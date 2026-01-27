@@ -1,6 +1,3 @@
-![Python](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/h5rdly/toke/main/pyproject.toml&label=Python&color=blue)
-
-
 # Toke
 
 **A Rust-backed JWT library for Python**
