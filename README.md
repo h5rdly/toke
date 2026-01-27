@@ -1,4 +1,5 @@
-[![Python Version](https://img.shields.io/endpoint?url=https://shields.io/badges/python-version-from-pep-621-toml?url=https://raw.githubusercontent.com/h5rdly/toke/main/pyproject.toml)]
+![PyPI - Version](https://img.shields.io/pypi/v/webtoken)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/webtoken)
 
 
 # Toke
