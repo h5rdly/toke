@@ -53,7 +53,7 @@ decoded = toke.decode(token, key, algorithms=["HS256"])
 print(decoded)
 ```
 
-2. Post-Quantum JWTs (ML-DSA)Toke is one of the first libraries to support NIST's finalized Post-Quantum signature standard.
+2. ML-DSA-65
 
 ```python
 import toke
