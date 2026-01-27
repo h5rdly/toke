@@ -25,7 +25,7 @@ ES512
 Enc: 1.9x | Dec: 1.5x
 ```
 
-See (and suggest!) more benchmarks under /benchmarks
+See (and suggest!) more benchmarks under [benchmarks](https://github.com/h5rdly/toke/blob/main/benchmarks/)
 
 ##  Size
 
