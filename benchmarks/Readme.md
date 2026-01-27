@@ -1,4 +1,4 @@
-For benchmark.py, on Linux, Python 3.13, we have - 
+For benchmarks.py, on Linux, Python 3.13, we have - 
 
 ```
 [ HS256 ]
