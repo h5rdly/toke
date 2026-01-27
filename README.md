@@ -6,7 +6,6 @@
 
 The Rust `.so` file on linux is ~3.9Mb, no external dependencies.
 
-
 ## 🚀 Speed
 
 Simple benchmark - 
@@ -20,7 +19,6 @@ See (or suggest!) more benchmarks under /benchmarks
 `pip install pytoke`
 
 Pre-compiled wheels are available for Linux (glibc and musl), Windows.
-
 
 ## 💻 Usage
 
@@ -40,8 +38,6 @@ print(decoded)
 ## 🤝 Compatibility
 
 Effort is made to make toke as compatible as possible with [PyJWT](https://github.com/jpadilla/pyjwt). To that effect, changes are made to make the relevant tests from the extensive PyJWT [test suite](https://github.com/jpadilla/pyjwt/tree/master/tests) pass. 
-
-More in the `/tests` folder [Readme]()
 
 ## 🛡️ Crypto
 
