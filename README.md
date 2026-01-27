@@ -9,19 +9,19 @@
 [Simple benchmark](https://github.com/h5rdly/toke/blob/main/benchmarks/benchmarks.py)
 
 ```
-[ HS256 ]
+HS256
 Enc: 3.0x | Dec: 1.8x
 
-[ RS256 ]
+RS256
 Enc: 56.2x | Dec: 1.2x
 
-[ ES256 ]
+ES256
 Enc: 2.3x | Dec: 1.9x
 
-[ EdDSA ]
+EdDSA
  Enc: 2.5x | Dec: 2.4x
 
-[ ES512 ]
+ES512
 Enc: 1.9x | Dec: 1.5x
 ```
 
