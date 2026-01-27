@@ -27,7 +27,7 @@ The Rust `.so` file on linux is ~3.9Mb, no external dependencies.
  >>> Speedup: Enc: 1.9x | Dec: 1.5x
 ```
 
-See (or suggest!) more benchmarks under /benchmarks
+See (and suggest!) more benchmarks under /benchmarks
 
 ## 📦 Installation
 
