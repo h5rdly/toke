@@ -61,7 +61,7 @@ Effort is made to make toke as compatible as possible with [PyJWT](https://githu
 Toke is backed by [jsonwebtoken](https://github.com/Keats/jsonwebtoken) and [aws-lc-rs](https://github.com/aws/aws-lc-rs).
 
 
-Supported algorithms
+### Supported algorithms
 
 Via jsonwebtoken - 
 - HS256
