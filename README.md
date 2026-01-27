@@ -37,7 +37,7 @@ Pre-compiled wheels are available for Linux (glibc and musl), Windows.
 
 ## 💻 Usage
 
-1. PyJWT Style (Drop-in Replacement)Toke mimics the PyJWT API, so migration is usually just an import change.
+1. PyJWT Style (Drop-in Replacement)
 
 ```python
 import toke
