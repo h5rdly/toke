@@ -50,8 +50,8 @@ decoded = toke.decode(token, key, algorithms=["HS256"])
 print(decoded)
 ```
 
-2. Toke style - in progress
-3. 
+2. Toke style - in design/progress
+   
 ## 🤝 Compatibility
 
 Effort is made to make toke as compatible as possible with [PyJWT](https://github.com/jpadilla/pyjwt). To that effect, changes are made to make the relevant tests from the extensive PyJWT [test suite](https://github.com/jpadilla/pyjwt/tree/master/tests) pass. 
