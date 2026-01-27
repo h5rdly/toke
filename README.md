@@ -79,12 +79,3 @@ More in the `/tests` folder [Readme]()
 ## 🧠 Fun Facts
 
 - Using the Rust Crypto backend with jsonwebtoken made the binary around ~1Mb on linux. However, RSA decoding was slower than using PyJWT.  
-
-
-### Usage
-[todo]
-
-#### PyJWT style
-
-
-#### Toke Validator style
