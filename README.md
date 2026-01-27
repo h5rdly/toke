@@ -4,7 +4,7 @@
 
 ## 📦 Size
 
-The .so file on linux is ~3.9Mb, no external dependencies.
+The Rust `.so` file on linux is ~3.9Mb, no external dependencies.
 
 
 ## 🚀 Speed
