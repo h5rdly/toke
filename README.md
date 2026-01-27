@@ -1,4 +1,4 @@
-![Python Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/h5rdly/toke/main/pyproject.toml)
+![Python](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/h5rdly/toke/main/.github/badges/python-versions.json&label=Python&color=blue)
 
 
 # Toke
