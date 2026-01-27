@@ -4,11 +4,11 @@
 
 **A Rust-backed JWT library for Python**
 
-## 📦 Size
+##  Size
 
 The Rust `.so` file on linux is ~3.9Mb, no external dependencies.
 
-## 🚀 Speed
+##  Speed
 
 [Simple benchmark](https://github.com/h5rdly/toke/blob/main/benchmarks/benchmarks.py)
 
@@ -31,13 +31,13 @@ The Rust `.so` file on linux is ~3.9Mb, no external dependencies.
 
 See (and suggest!) more benchmarks under /benchmarks
 
-## 📦 Installation
+##  Installation
 
 `pip install webtoken`
 
 Developed on Linux / Python 3.13, currently can't attest to other platforms.
 
-## 💻 Usage
+##  Usage
 
 1. PyJWT Style (Drop-in Replacement)
 
@@ -54,11 +54,11 @@ print(decoded)
 
 2. Toke style - in design
    
-## 🤝 Compatibility
+##  Compatibility
 
 Effort is made to make toke as compatible as possible with [PyJWT](https://github.com/jpadilla/pyjwt). To that effect, changes are made to make the relevant tests from the extensive PyJWT [test suite](https://github.com/jpadilla/pyjwt/tree/master/tests) pass. 
 
-## 🛡️ Crypto
+##  Crypto
 
 Toke is backed by [jsonwebtoken](https://github.com/Keats/jsonwebtoken) and [aws-lc-rs](https://github.com/aws/aws-lc-rs).
 
@@ -79,6 +79,6 @@ Via aws-lc-rs -
 - ML-DSA-65
 
 - 
-## 🧠 Fun Facts
+##  Fun Facts
 
 - Using the Rust Crypto backend with jsonwebtoken made the binary around ~1Mb on linux. However, RSA decoding was slower than using PyJWT. Thus, we switched to aws-lc-rs.  
