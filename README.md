@@ -2,7 +2,7 @@
 
 # Toke
 
-**A Rust-backed JWT library for Python**
+**Rust-backed JWT**
 
 ##  Size
 
