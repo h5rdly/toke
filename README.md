@@ -1,3 +1,5 @@
+![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-2ea44f)
+
 # Toke
 
 **A Rust-backed JWT library for Python**
