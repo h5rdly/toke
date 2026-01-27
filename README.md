@@ -1,4 +1,4 @@
-![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-2ea44f)
+![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-darkgreen?style=flat&logo=python&logoColor=white)
 
 # Toke
 
