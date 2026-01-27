@@ -1,4 +1,4 @@
-![Pyversions](https://img.shields.io)
+
 
 # Toke
 
