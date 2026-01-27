@@ -11,15 +11,7 @@ The .so file on linux is ~3.6Mb, no external dependencies.
 
 Simple benchmark - 
 
-```md
-1k Payload, HS256, 100k iterations
-Library   | Operation | Time (s) | Speedup
-----------|-----------|----------|--------
-PyJWT     | Encode    | 1.84s    | 1x
-Toke      | Encode    | 0.15s    | ~12x
-----------------------------------------
-PyJWT     | Decode    | 2.10s    | 1x
-Toke      | Decode    | 0.12s    | ~17x
+https://github.com/h5rdly/toke/blob/main/benchmarks/benchmarks.py
 ```
 
 See (or suggest!) more benchmarks under /benchmarks
