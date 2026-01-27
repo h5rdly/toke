@@ -22,7 +22,6 @@ See (or suggest!) more benchmarks under /benchmarks
 Toke is backed by [jsonwebtoken](https://github.com/Keats/jsonwebtoken) and [aws-lc-rs](https://github.com/aws/aws-lc-rs).
 
 
-```md
 Supported algorithms
 | Type | Algorithm | Notes |
 | :--- | :--- | :--- |
@@ -37,16 +36,6 @@ Supported algorithms
 
 
         Note: "none" alg is supported for compatibility but strongly discouraged.
-
-Via jsonwebtoken - 
-- HS256
-- HS384
-- HS512
-- RS256
-- RS384
-- RS512
--
-
 
 ## 📦 Installation
 
@@ -97,14 +86,9 @@ More in the `/tests` folder [Readme]()
 
 - Using the Rust Crypto backend with jsonwebtoken made the binary around ~1Mb on linux. However, RSA decoding was slower than using PyJWT.  
 
-- [ML-DSA-65](https://github.com/aws/aws-lc-rs/tree/main/aws-lc-rs/src/pqdsa) is currently supported only on the unstable branch of aws-lc-rs.
-
-
-
-
-`pip install pytoke`  # Add quant / no quant options
 
 ### Usage
+[todo]
 
 #### PyJWT style
 
