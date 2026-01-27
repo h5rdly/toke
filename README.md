@@ -10,19 +10,19 @@
 
 ```
 [ HS256 ]
- >>> Speedup: Enc: 3.0x | Dec: 1.8x
+Enc: 3.0x | Dec: 1.8x
 
 [ RS256 ]
- >>> Speedup: Enc: 56.2x | Dec: 1.2x
+Enc: 56.2x | Dec: 1.2x
 
 [ ES256 ]
- >>> Speedup: Enc: 2.3x | Dec: 1.9x
+Enc: 2.3x | Dec: 1.9x
 
 [ EdDSA ]
- >>> Speedup: Enc: 2.5x | Dec: 2.4x
+ Enc: 2.5x | Dec: 2.4x
 
 [ ES512 ]
- >>> Speedup: Enc: 1.9x | Dec: 1.5x
+Enc: 1.9x | Dec: 1.5x
 ```
 
 See (and suggest!) more benchmarks under /benchmarks
