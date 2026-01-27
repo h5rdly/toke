@@ -33,7 +33,7 @@ See (and suggest!) more benchmarks under /benchmarks
 
 `pip install webtoken`
 
-Pre-compiled wheels are available for Linux (glibc and musl), Windows.
+Developed on Linux / Python 3.13, currently can't attest to other platforms.
 
 ## 💻 Usage
 
