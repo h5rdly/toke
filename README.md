@@ -86,29 +86,9 @@ private_seed = os.urandom(32)
 pq_token = toke.encode(payload, private_seed, algorithm="ML-DSA-65")
 ```
 
-3. Custom AlgorithmsHave a proprietary HSM or a weird experimental algorithm? You can plug it into Toke without forking.
-
-```python
-import toke
-
-class MyCustomAlgo:
-
-    def sign(self, msg: bytes, key: bytes) -> bytes:
-        return b"custom_signature"
-
-    def verify(self, msg: bytes, sig: bytes, key: bytes) -> bool:
-        return sig == b"custom_signature"
-
-# Register it
-toke.register_algorithm("MY-ALGO", MyCustomAlgo())
-
-# Use it naturally (Core JWT logic happens in Rust, crypto happens in Python)
-token = toke.encode(payload, key, algorithm="MY-ALGO")
-```
-
 ## 🤝 Compatibility
 
-Effort was made to make toke as compatible as possible with [PyJWT](https://github.com/jpadilla/pyjwt). To that effect, changes are made to make the relevant tests from the extensive PyJWT [test suite](https://github.com/jpadilla/pyjwt/tree/master/tests) pass. 
+Effort is made to make toke as compatible as possible with [PyJWT](https://github.com/jpadilla/pyjwt). To that effect, changes are made to make the relevant tests from the extensive PyJWT [test suite](https://github.com/jpadilla/pyjwt/tree/master/tests) pass. 
 
 More in the `/tests` folder [Readme]()
 
