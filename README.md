@@ -15,26 +15,6 @@ https://github.com/h5rdly/toke/blob/main/benchmarks/benchmarks.py
 
 See (or suggest!) more benchmarks under /benchmarks
 
-
-## 🛡️ Security
-
-Toke is backed by [jsonwebtoken](https://github.com/Keats/jsonwebtoken) and [aws-lc-rs](https://github.com/aws/aws-lc-rs).
-
-
-Supported algorithms
-
-Via jsonwebtoken - 
-- HS256
-- HS384
-- HS512
-- RS256
-- RS384
-- RS512
-
-Via aws-lc-rs - 
-- ES512
-- ML-DSA-65
-- 
 ## 📦 Installation
 
 `pip install pytoke`
@@ -63,7 +43,26 @@ Effort is made to make toke as compatible as possible with [PyJWT](https://githu
 
 More in the `/tests` folder [Readme]()
 
+## 🛡️ Crypto
 
+Toke is backed by [jsonwebtoken](https://github.com/Keats/jsonwebtoken) and [aws-lc-rs](https://github.com/aws/aws-lc-rs).
+
+
+Supported algorithms
+
+Via jsonwebtoken - 
+- HS256
+- HS384
+- HS512
+- RS256
+- RS384
+- RS512
+
+Via aws-lc-rs - 
+- ES512
+- ML-DSA-65
+
+- 
 ## 🧠 Fun Facts
 
 - Using the Rust Crypto backend with jsonwebtoken made the binary around ~1Mb on linux. However, RSA decoding was slower than using PyJWT.  
