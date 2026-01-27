@@ -8,7 +8,7 @@ The Rust `.so` file on linux is ~3.9Mb, no external dependencies.
 
 ## 🚀 Speed
 
-[Simple benchmark](https://github.com/h5rdly/toke/blob/main/benchmarks/benchmarks.py) - 
+[Simple benchmark](https://github.com/h5rdly/toke/blob/main/benchmarks/benchmarks.py)
 
 ```
 [ HS256 ]
