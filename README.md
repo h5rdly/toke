@@ -12,7 +12,6 @@ The .so file on linux is ~3.6Mb, no external dependencies.
 Simple benchmark - 
 
 https://github.com/h5rdly/toke/blob/main/benchmarks/benchmarks.py
-```
 
 See (or suggest!) more benchmarks under /benchmarks
 
