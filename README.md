@@ -31,7 +31,7 @@ See (and suggest!) more benchmarks under /benchmarks
 
 ## 📦 Installation
 
-`pip install pytoke`
+`pip install webtoken`
 
 Pre-compiled wheels are available for Linux (glibc and musl), Windows.
 
@@ -50,6 +50,8 @@ decoded = toke.decode(token, key, algorithms=["HS256"])
 print(decoded)
 ```
 
+2. Toke style - in progress
+3. 
 ## 🤝 Compatibility
 
 Effort is made to make toke as compatible as possible with [PyJWT](https://github.com/jpadilla/pyjwt). To that effect, changes are made to make the relevant tests from the extensive PyJWT [test suite](https://github.com/jpadilla/pyjwt/tree/master/tests) pass. 
