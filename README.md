@@ -50,7 +50,7 @@ decoded = toke.decode(token, key, algorithms=["HS256"])
 print(decoded)
 ```
 
-2. Toke style - in design/progress
+2. Toke style - in design
    
 ## 🤝 Compatibility
 
