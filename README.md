@@ -44,33 +44,17 @@ Pre-compiled wheels are available for Linux (glibc and musl), Windows.
 
 ## 💻 Usage
 
-1. PyJWT Style (Drop-in Replacement)Toke mimics the PyJWT API, so migration is usually just an import change.Pythonimport toke
+1. PyJWT Style (Drop-in Replacement)Toke mimics the PyJWT API, so migration is usually just an import change.
 
 ```python
-# Encoding
+import toke
+
 key = "secret"
 payload = {"sub": "1234567890", "name": "John Doe", "iat": 1516239022}
 token = toke.encode(payload, key, algorithm="HS256")
 
-# Decoding
 decoded = toke.decode(token, key, algorithms=["HS256"])
 print(decoded)
-```
-
-2. ML-DSA-65
-
-```python
-import toke
-import os
-
-# ML-DSA keys are currently raw seed bytes (32 bytes)
-private_seed = os.urandom(32)
-
-# Public keys are derived (1952 bytes for ML-DSA-65)
-# (In a real app, you would load these from a file/KMS)
-
-# Sign with PQ
-pq_token = toke.encode(payload, private_seed, algorithm="ML-DSA-65")
 ```
 
 ## 🤝 Compatibility
