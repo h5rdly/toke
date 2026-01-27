@@ -31,6 +31,10 @@ Via jsonwebtoken -
 - RS384
 - RS512
 
+Via aws-lc-rs - 
+- ES512
+- ML-DSA-65
+- 
 ## 📦 Installation
 
 `pip install pytoke`
