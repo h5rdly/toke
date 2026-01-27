@@ -23,19 +23,14 @@ Toke is backed by [jsonwebtoken](https://github.com/Keats/jsonwebtoken) and [aws
 
 
 Supported algorithms
-| Type | Algorithm | Notes |
-| :--- | :--- | :--- |
-| **HMAC** | `HS256`, `HS384`, `HS512` | Standard symmetric signatures |
-| **RSA** | `RS256`, `RS384`, `RS512` | PKCS#1 v1.5 padding |
-| **PSS** | `PS256`, `PS384`, `PS512` | Probabilistic Signature Scheme |
-| **ECDSA** | `ES256`, `ES384` | NIST P-256 / P-384 |
-| **Extended ECDSA** | `ES512` | **NIST P-521** (Added in Toke) |
-| **Blockchain** | `ES256K` | **secp256k1** (Bitcoin/Ethereum) (Added in Toke) |
-| **EdDSA** | `EdDSA` | Ed25519 |
-| **Post-Quantum** | `ML-DSA-65` | **NIST FIPS 204 (Dilithium)** (Added in Toke)
 
-
-        Note: "none" alg is supported for compatibility but strongly discouraged.
+Via jsonwebtoken - 
+- HS256
+- HS384
+- HS512
+- RS256
+- RS384
+- RS512
 
 ## 📦 Installation
 
