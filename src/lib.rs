@@ -240,9 +240,14 @@ fn peek_algorithm(token: &str) -> PyResult<String> {
 }
 
 
-fn get_key_bytes(py: Python, key: &Bound<'_, PyAny>, alg_name: &str, is_signing: bool) -> PyResult<Vec<u8>> {
+fn get_key_bytes(
+    py: Python,
+    key: &Bound<'_, PyAny>, 
+    alg_name: &str, 
+    is_signing: bool
+) -> PyResult<Vec<u8>> {
     
-    // 1. Extract Raw Bytes (Python -> Rust)
+    // A. Extract Raw Bytes (Python -> Rust)
     let key_bytes = if let Ok(s) = key.extract::<String>() {
         s.into_bytes()
     } else if let Ok(b) = key.extract::<Vec<u8>>() {
@@ -251,29 +256,39 @@ fn get_key_bytes(py: Python, key: &Bound<'_, PyAny>, alg_name: &str, is_signing:
         return Err(PyTypeError::new_err("Key must be string or bytes"));
     };
 
-    // 2. Check Routing
-    let is_plugin = get_algorithm(py, alg_name).is_some();
+    // DEBUG: Print what we actually got
+    let snippet_len = std::cmp::min(40, key_bytes.len());
+    let snippet = String::from_utf8_lossy(&key_bytes[..snippet_len]);
+    // Replace newlines with \n for cleaner logs
+    let clean_snippet = snippet.replace('\n', "\\n").replace('\r', "\\r");
+
+    // B. Check Routing
     let is_external = ExternalAlgorithm::from_str(alg_name).is_some();
-    
-    if is_plugin || is_external {
-        // Return raw bytes immediately. Plugins/External verify keys themselves.
-        return Ok(key_bytes);
-    }
+    if is_external { return Ok(key_bytes); }
 
-    // 3. Standard Algorithm Checks
+    // C. Standard Checks
     let alg = Algorithm::from_str(alg_name)
-        .map_err(|_| PyValueError::new_err(format!("Algorithm '{}' not supported", alg_name)))?;
+        .map_err(|_| PyValueError::new_err(err_loc!("Algorithm '{}' not supported", alg_name)))?;
 
-    // Safety: Don't use PEM for HMAC
-    if is_hmac(alg) && is_pem(&key_bytes) {
-        return Err(InvalidKeyError::new_err(
-            "The specified key is an asymmetric key... should not be used as an HMAC secret."
-        ));
+    // --- Safety 1: Don't use PEM for HMAC ---
+    if is_hmac(alg) {
+        let looks_like_pem = is_pem(&key_bytes);
+        
+        if looks_like_pem {
+            return Err(InvalidKeyError::new_err(
+                "The specified key is an asymmetric key... should not be used as an HMAC secret."
+            ));
+        }
     }
 
-    // Safety: Don't use Public Key for Signing (Encode)
+    // --- Safety 2: Don't use Public Key for Signing ---
     if is_signing && !is_hmac(alg) {
-        ensure_key_is_private(&key_bytes)?;
+        let key_str = String::from_utf8_lossy(&key_bytes);
+        if key_str.contains("BEGIN PUBLIC KEY") || key_str.contains("BEGIN RSA PUBLIC KEY") {
+             return Err(InvalidKeyError::new_err(
+                "InvalidKeyError: You passed a Public Key to encode(). Signing requires a Private Key."
+            ));
+        }
     }
 
     Ok(key_bytes)
@@ -318,20 +333,24 @@ fn prepare_validation(
 
     let alg_strs = algorithms.unwrap_or_else(|| vec!["HS256".to_string()]);
     let standard_algs: Vec<Algorithm> = alg_strs.iter().map(|s| Algorithm::from_str(s)).filter_map(Result::ok).collect();
-    
-    let mut validation = Validation::new(standard_algs.first().cloned().unwrap_or(Algorithm::HS256));
-    validation.algorithms = standard_algs;
+    let base_alg = standard_algs.first().cloned().unwrap_or(Algorithm::HS256);
+
+    let mut validation = Validation::new(base_alg);
+    if !standard_algs.is_empty() {
+        validation.algorithms = standard_algs;
+    } else {
+        // If we couldn't parse any standard algs, we leave validation.algorithms as default (HS256 from new)
+        // This effectively disables the "index out of bounds" panic.
+    }
+
     validation.leeway = 0; 
     validation.validate_nbf = true; 
     validation.required_spec_claims.remove("exp"); 
-    
     // Disable crate's internal checks for aud/iss so we can do it manually.
-    // NOTE: validate_iss does not exist in standard jsonwebtoken struct, relying on iss=None default.
     validation.validate_aud = false; 
     validation.aud = None;
     validation.iss = None;
 
-    // Track user preference
     let mut check_aud = true;
     let mut check_iss = true;
 
@@ -486,6 +505,9 @@ fn decode_impl(
             .map_err(|e| TokeError::Generic(format!("Invalid token: {}", e)))?;
         token_data.claims
     } else {
+        if validation.algorithms.is_empty() {
+             return Err(TokeError::Generic("No algorithms allowed for validation".to_string()));
+        }
         let decoding_key = if is_hmac(validation.algorithms[0]) {
             DecodingKey::from_secret(&key_bytes)
         } else {
@@ -571,8 +593,7 @@ fn encode_impl(payload_val: Value, key_bytes: Vec<u8>, algorithm: &str, headers:
 
 fn decode_none_impl(token: &str, verify: bool, algorithms: &Option<Vec<String>>) -> Result<Value, TokeError> {
     
-    let allowed = if !verify { true } else { match algorithms { Some(algs) => algs.iter().any(|a| a.eq_ignore_ascii_case("none")), None => false, } };
-    if !allowed { return Err(TokeError::Generic("Algorithm 'none' is not allowed".to_string())); }
+    let allowed = match algorithms { Some(algs) => algs.iter().any(|a| a.eq_ignore_ascii_case("none")), None => false };    if !allowed { return Err(TokeError::Generic("Algorithm 'none' is not allowed".to_string())); }
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 { return Err(TokeError::Generic("Invalid token format".to_string())); }
     let header_json = URL_SAFE_NO_PAD.decode(parts[0]).map_err(|e| TokeError::Generic(format!("Invalid header base64: {}", e)))?;
@@ -665,8 +686,7 @@ fn decode<'py>(
 
     // 4. "None" Algo
     if alg_str.eq_ignore_ascii_case("none") {
-        let allowed = if !effective_verify { true } else { algorithms.as_ref().map_or(false, |algs| algs.iter().any(|x| x.eq_ignore_ascii_case("none"))) };
-        if !allowed { return Err(InvalidTokenError::new_err("Algorithm 'none' is not allowed")); }
+        let allowed = algorithms.as_ref().map_or(false, |algs| algs.iter().any(|x| x.eq_ignore_ascii_case("none")));        if !allowed { return Err(InvalidTokenError::new_err("Algorithm 'none' is not allowed")); }
         let claims = py.detach(move || { decode_none_impl(&token_string, effective_verify, &algorithms) }).map_err(PyErr::from)?;
         return pythonize(py, &claims).map_err(|e| PyValueError::new_err(format!("Output failed: {}", e)));
     }
@@ -682,6 +702,28 @@ fn decode<'py>(
         Vec::new()
     };
 
+    let is_external = ExternalAlgorithm::from_str(&alg_str).is_some();
+    if is_external {
+         let claims = py.detach(move || -> PyResult<Value> {
+            let parts: Vec<&str> = token_string.split('.').collect();
+            if parts.len() != 3 { return Err(PyValueError::new_err("Invalid Token Format")); }
+            
+            if effective_verify {
+                let signing_input = format!("{}.{}", parts[0], parts[1]);
+                let ext = ExternalAlgorithm::from_str(&alg_str).unwrap();
+                let valid = ext.verify(signing_input.as_bytes(), parts[2], &key_bytes)
+                    .map_err(|e| PyValueError::new_err(format!("Verification failed: {:?}", e)))?;
+                
+                if !valid { return Err(InvalidSignatureError::new_err("Invalid Signature")); }
+            }
+            
+            let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).map_err(|_| PyValueError::new_err("Invalid Payload Base64"))?;
+            let claims: Value = serde_json::from_slice(&payload_bytes).map_err(|_| PyValueError::new_err("Invalid Payload JSON"))?;
+            Ok(claims)
+        })?;
+        return pythonize(py, &claims).map_err(|e| PyValueError::new_err(format!("Output failed: {}", e)));
+    }
+    
     // 6. Branch: Custom Plugin (Must happen in Python thread)
     // We check registry directly here because plugins need the GIL
     if let Some(plugin) = get_algorithm(py, &alg_str) {
@@ -798,7 +840,8 @@ fn toke(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("InvalidIssuedAtError", py.get_type::<InvalidIssuedAtError>())?;
     m.add("InvalidJTIError", py.get_type::<InvalidJTIError>())?;
     m.add("InvalidSubjectError", py.get_type::<InvalidSubjectError>())?;
-
+    m.add("InvalidKeyError", py.get_type::<InvalidKeyError>())?;
+    
     m.add_function(wrap_pyfunction!(encode, m)?)?;
     m.add_function(wrap_pyfunction!(decode, m)?)?;
     m.add_function(wrap_pyfunction!(decode_complete, m)?)?;

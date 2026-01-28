@@ -14,11 +14,7 @@ use aws_lc_rs::signature::{
     ECDSA_P521_SHA512_FIXED_SIGNING,
     ECDSA_P256K1_SHA256_FIXED_SIGNING,
 };
-use aws_lc_rs::unstable::signature::{
-    PqdsaKeyPair, 
-    ML_DSA_65_SIGNING, 
-    ML_DSA_44_SIGNING, 
-    ML_DSA_87_SIGNING
+use aws_lc_rs::unstable::signature::{PqdsaKeyPair, ML_DSA_65_SIGNING, ML_DSA_44_SIGNING, ML_DSA_87_SIGNING
 };
 
 
