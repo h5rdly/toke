@@ -20,11 +20,13 @@ use serde_json::{Value, Map};
 use serde::{Serialize, Deserialize};
 
 mod algorithms; 
-mod keygen;  // Export some convenience crypto logic for testing
-pub mod jwk_api;
+mod keygen;  
+
+mod pyjwt_algo_api;
+pub mod pyjwt_jwk_api;
 
 use crate::algorithms::ExternalAlgorithm;
-use crate::jwk_api::{PyJwk, PyJwkSet};
+use crate::pyjwt_jwk_api::{PyJWK, PyJWKSet};
 
 
 // --- Exception Definitions ---
@@ -42,6 +44,9 @@ create_exception!(toke, InvalidJTIError, InvalidTokenError);
 create_exception!(toke, InvalidSubjectError, InvalidTokenError);
 create_exception!(toke, InvalidAlgorithmError, InvalidTokenError);
 create_exception!(toke, InvalidKeyError, PyJWTError);
+
+create_exception!(toke, PyJWKSetError, PyJWTError); 
+create_exception!(toke, PyJWKError, PyJWTError);    
 
 
 // -- Debug helper macros
@@ -842,6 +847,10 @@ fn toke(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("InvalidSubjectError", py.get_type::<InvalidSubjectError>())?;
     m.add("InvalidKeyError", py.get_type::<InvalidKeyError>())?;
     
+    m.add("PyJWKSetError", py.get_type::<PyJWKSetError>())?; 
+    m.add("PyJWKError", py.get_type::<PyJWKError>())?;       
+
+
     m.add_function(wrap_pyfunction!(encode, m)?)?;
     m.add_function(wrap_pyfunction!(decode, m)?)?;
     m.add_function(wrap_pyfunction!(decode_complete, m)?)?;
@@ -853,9 +862,10 @@ fn toke(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Testing comfort logic to use from Python
     m.add_function(wrap_pyfunction!(keygen::generate_key_pair, m)?)?;
 
-    m.add_class::<PyJwk>()?;
-    m.add_class::<PyJwkSet>()?;
-    jwk_api::register_jwk_module(py, m)?;
+    m.add_class::<PyJWK>()?;
+    m.add_class::<PyJWKSet>()?;
+    pyjwt_jwk_api::register_jwk_module(py, m)?;
+    pyjwt_algo_api::register_compat_module(py, m)?;
 
     Ok(())
 }
