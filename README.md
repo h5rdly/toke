@@ -53,7 +53,23 @@ print(decoded)
 ```
 
 2. Toke style - in design
-   
+
+3. Asyncio variants
+
+```python
+import toke
+
+# The rust based encode/decode release the GIL
+# You can send them away on asyncio.to_thread(), or use the provided wrappers
+
+payload = {"name": "Bob"}
+token = await toke.encode_async(payload, "secret", algorithm="HS256")
+
+decoded = await toke.decode_async(token, "secret", algorithms=["HS256"])
+print(decoded)
+# {'name': 'Bob'}
+```
+
 ##  Compatibility
 
 Effort is made to make toke as compatible as possible with [PyJWT](https://github.com/jpadilla/pyjwt). To that effect, changes are made to make the relevant tests from the extensive PyJWT [test suite](https://github.com/jpadilla/pyjwt/tree/master/tests) pass. 
