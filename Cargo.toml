@@ -14,10 +14,6 @@ crate-type = ["cdylib"]
 jsonwebtoken = { version = "10.0", features = ["aws_lc_rs"] }
 aws-lc-rs = { version = "=1.15.4", features = ["unstable"] }   # ML-DSA-65 is currently supported on the unstable branch
 
-ssh-key = { version = "0.6", features = ["std", "rsa", "ed25519"] }
-rsa = { version = "0.9", features = ["std", "pem"] }
-ed25519-dalek = { version = "2.2", features = ["pkcs8"] }
-pkcs8 = { version = "0.10", features = ["std"] }
 base64 = "0.22"
 
 serde_json = "1.0"

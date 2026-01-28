@@ -14,12 +14,7 @@ def _check_algo(alg, payload):
         # 1. Generate Key
         priv_bytes, pub_bytes = toke.generate_key_pair(alg)
         
-        # Use bytes directly for Toke (it supports both bytes and strings)
-        # but converting to string for 'standard' algos is safer if you want 
-        # to verify cross-compatibility later.
         if alg in ["ML-DSA-65", "ML-DSA-44", "ML-DSA-87"]:
-            # ML-DSA keys might be raw bytes or PEM depending on your keygen
-            # Our keygen returns PEM bytes, so we decode to string for convenience
             priv = priv_bytes.decode("utf-8")
             pub = pub_bytes.decode("utf-8")
         else:
