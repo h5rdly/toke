@@ -1,0 +1,10 @@
+# Rust dependencies and build artifacts
+Cargo.lock
+target/
+
+# Python cache files
+__pycache__/
+**/__pycache__/
+
+# Distribution/build folders
+dist/

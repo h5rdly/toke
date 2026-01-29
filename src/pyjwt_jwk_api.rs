@@ -1,8 +1,8 @@
 use jsonwebtoken::DecodingKey;
-use jsonwebtoken::jwk::{Jwk as RustJwk, JwkSet as RustJwkSet, AlgorithmParameters, EllipticCurve, };
+use jsonwebtoken::jwk::{Jwk as RustJwk, };
 
 use pyo3::prelude::*;
-use pyo3::exceptions::{PyValueError, PyKeyError, PyTypeError};
+use pyo3::exceptions::{PyValueError, PyKeyError, };
 use pyo3::types::{PyDict, PyList};
 
 use pythonize::depythonize;
@@ -152,9 +152,8 @@ impl PyJWKSet {
     #[new]
     #[pyo3(signature = (keys))]
     fn new(keys: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let list = keys.downcast::<PyList>().map_err(|_| {
-            PyJWKSetError::new_err("Invalid JWK Set value") 
-        })?;
+        let list = keys.extract::<Bound<'_, PyList>>()
+        .map_err(|_| {PyJWKSetError::new_err("Invalid JWK Set value") })?;
 
         let mut py_keys = Vec::new();
         for item in list.iter() {

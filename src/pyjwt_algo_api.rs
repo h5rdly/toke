@@ -62,8 +62,8 @@ impl ECAlgorithm {
     fn from_jwk(jwk: &Bound<'_, PyAny>) -> PyResult<PyJWK> {
         if let Ok(s) = jwk.extract::<String>() {
              PyJWK::from_json(&s, None)
-        } else if let Ok(d) = jwk.downcast::<PyDict>() {
-             PyJWK::from_dict(d, None)
+        } else if let Ok(d) = jwk.extract::<Bound<'_, PyDict>>() {
+             PyJWK::from_dict(&d, None)
         } else {
              use pyo3::exceptions::PyTypeError;
              Err(PyTypeError::new_err("Expected string or dict"))
@@ -92,8 +92,8 @@ impl HMACAlgorithm {
     fn from_jwk(jwk: &Bound<'_, PyAny>) -> PyResult<PyJWK> {
         if let Ok(s) = jwk.extract::<String>() {
              PyJWK::from_json(&s, Some("HS256".to_string()))
-        } else if let Ok(d) = jwk.downcast::<PyDict>() {
-             PyJWK::from_dict(d, Some("HS256".to_string()))
+        } else if let Ok(d) = jwk.extract::<Bound<'_, PyDict>>() {
+             PyJWK::from_dict(&d, Some("HS256".to_string()))
         } else {
              use pyo3::exceptions::PyTypeError;
              Err(PyTypeError::new_err("Expected string or dict"))
@@ -115,8 +115,8 @@ impl OKPAlgorithm {
     fn from_jwk(jwk: &Bound<'_, PyAny>) -> PyResult<PyJWK> {
         if let Ok(s) = jwk.extract::<String>() {
              PyJWK::from_json(&s, Some("EdDSA".to_string()))
-        } else if let Ok(d) = jwk.downcast::<PyDict>() {
-             PyJWK::from_dict(d, Some("EdDSA".to_string()))
+        } else if let Ok(d) = jwk.extract::<Bound<'_, PyDict>>() {
+             PyJWK::from_dict(&d, Some("EdDSA".to_string()))
         } else {
              use pyo3::exceptions::PyTypeError;
              Err(PyTypeError::new_err("Expected string or dict"))

@@ -6,7 +6,6 @@ sys.path.append(__file__.rsplit("/", 2)[0])
 import toke
 
 
-
 def _check_algo(alg, payload):
     """Helper to run a full Generate -> Encode -> Decode cycle"""
 
@@ -405,6 +404,29 @@ def test_key_type_safety():
     print("✅ PASSED Key Type Safety")
 
 
+def test_cryto_utils():
+
+    print("\n--- Test: Crypto Utils ")
+    key = toke.random_bytes(32)
+    data = b"Sensitive Database Record"
+    aad = b"record_id:12345" # Bind encryption to context!
+
+    ciphertext = toke.encrypt_aes_256_gcm(key, data, aad)
+    print(f"Encrypted ({len(ciphertext)} bytes): {ciphertext.hex()[:20]}...")
+
+    decrypted = toke.decrypt_aes_256_gcm(key, ciphertext, aad)
+    print((f"✅" if decrypted == data else "❌") + " aes_256_gcm encrypt -> decrypt")
+
+    #  Key Derivation
+    master_secret = b"shared-secret-from-dh"
+    derived_key = toke.hkdf_sha256(
+        secret=master_secret, 
+        salt=b"random-salt", 
+        info=b"application-specific-context",
+        length=32
+    )
+
+
 async def test_asyncio():
     print("\n--- Testing Async Support ---")
     
@@ -467,6 +489,8 @@ if __name__ == "__main__":
         test_invalid_algorithm_string,
         test_key_type_safety,
 
+        test_cryto_utils,
+        
         # test_custom_algo,
     )
 
