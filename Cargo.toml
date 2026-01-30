@@ -12,7 +12,7 @@ aws-lc-rs = { version = "=1.15.4", features = ["unstable"] }   # ML-DSA-65 is cu
 
 base64 = "0.22"
 
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_bytes = "0.11"
 

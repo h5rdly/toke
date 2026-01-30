@@ -1,6 +1,7 @@
-import asyncio, json, base64, datetime, warnings, sys
+import asyncio, json, base64, datetime, warnings, sys, types
 from typing import Optional, List, Dict, Any, Union
 
+import binascii # for PyJWS error compatibility
 
 # -- Load Rust Core
 
@@ -31,6 +32,10 @@ if toke_rs is None:
 
 _rust_encode, _rust_decode, _rust_decode_complete = toke_rs.encode, toke_rs.decode, toke_rs.decode_complete
 
+PyJWK = toke_rs.api_jwk.PyJWK
+PyJWKSet = toke_rs.api_jwk.PyJWKSet
+PyJWKError = toke_rs.api_jwk.PyJWKError
+PyJWKSetError = toke_rs.api_jwk.PyJWKSetError
 
 # --- Helpers 
 
@@ -41,11 +46,10 @@ def _prepare_token(token: Union[str, bytes]) -> str:
 
 
 def _merge_options(options: Optional[Dict], kwargs: Dict) -> Dict:
+    '''  PyJWT treats options["verify_signature"] as the source of truth if it exists '''
 
     opts = options.copy() if options else {}
-    # PyJWT treats options["verify_signature"] as the source of truth if it exists.
-    
-    # Defaults if verify_signature is explicitly False
+
     if opts.get("verify_signature") is False:
         for k in ["verify_exp", "verify_nbf", "verify_iat", "verify_aud", "verify_iss", "verify_sub", "verify_jti"]:
             if k not in opts: opts[k] = False
@@ -213,7 +217,7 @@ def _validate_iss(payload, issuer):
         raise toke_rs.InvalidIssuerError("Invalid issuer")
 
 
-class Toke:
+class WebToken:
     """ A jwt.PyJWT-like interface. Allows users to store default options in the instance """
 
     def __init__(self, options: Optional[Dict[str, Any]] = None):
@@ -237,6 +241,243 @@ class Toke:
         return decode_complete(token, key, algorithms, merged_options, **kwargs)
 
 
+class PyJWS:
+
+    header_typ = "JWT"
+
+    def __init__(self, algorithms=None, options=None):
+        self._algorithms = {}
+        
+        self.options = {"verify_signature": True}
+        if options:
+            self.options.update(options)
+        
+        # Defaults
+        defaults = ["HS256", "HS384", "HS512", "RS256", "RS384", "RS512", 
+                    "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "none"]
+        defaults.extend(["ES256K", "ML-DSA-65", "EdDSA"])
+        
+        allowed = algorithms if algorithms is not None else defaults
+        for alg in allowed:
+            self._algorithms[alg] = True # Mark as present
+
+
+    def _validate_headers(self, headers):
+        if "kid" in headers and not isinstance(headers["kid"], str):
+             raise toke_rs.InvalidTokenError("Key ID header parameter must be a string")
+
+
+    def register_algorithm(self, alg_id, alg_obj):
+        if alg_id in self._algorithms:
+            raise ValueError("Algorithm already has a handler.")
+        
+        # [FIX] Strict Type Check
+        if not isinstance(alg_obj, Algorithm):
+            raise TypeError("Object is not of type `Algorithm`")
+            
+        self._algorithms[alg_id] = alg_obj
+
+
+    def unregister_algorithm(self, alg_id):
+        if alg_id not in self._algorithms:
+            raise KeyError("The specified algorithm could not be removed because it is not registered.")
+        del self._algorithms[alg_id]
+
+
+    def get_algorithms(self):
+        return list(self._algorithms.keys())
+
+
+    def get_unverified_header(self, token):
+
+        header = self._load(token)[2]
+        self._validate_headers(header)
+
+        return header
+
+
+
+    def decode(self, token, key='', algorithms=None, options=None, detached_payload=None, **kwargs):
+        decoded = self.decode_complete(token, key, algorithms, options, detached_payload=detached_payload, **kwargs)
+        return decoded["payload"]
+
+
+    def _load(self, jwt):
+
+        if isinstance(jwt, str):
+            jwt = jwt.encode("utf-8")
+
+        if not isinstance(jwt, bytes):
+            raise toke_rs.DecodeError(f"Invalid token type. Token must be a {bytes}")
+
+        try:
+            signing_input, crypto_segment = jwt.rsplit(b".", 1)
+            header_segment, payload_segment = signing_input.split(b".", 1)
+        except ValueError as err:
+            raise toke_rs.DecodeError("Not enough segments") from err
+
+        try:
+            header_data = toke_rs.base64url_decode(header_segment)
+        except (TypeError, binascii.Error, ValueError) as err:
+            raise toke_rs.DecodeError("Invalid header padding") from err
+
+        try:
+            header = json.loads(header_data)
+        except ValueError as e:
+            raise toke_rs.DecodeError(f"Invalid header string: {e}") from e
+
+        if not isinstance(header, dict):
+            raise toke_rs.DecodeError("Invalid header string: must be a json object")
+
+        # Check b64 header
+        if header.get("b64", True) is False:
+            payload = payload_segment # Raw bytes
+        else:
+            try:
+                payload = toke_rs.base64url_decode(payload_segment)
+            except (TypeError, binascii.Error, ValueError) as err:
+                raise toke_rs.DecodeError("Invalid payload padding") from err
+
+        try:
+            signature = toke_rs.base64url_decode(crypto_segment)
+        except (TypeError, binascii.Error, ValueError) as err:
+            raise toke_rs.DecodeError("Invalid crypto padding") from err
+
+        return (payload, signing_input, header, signature)
+
+
+    def encode(self, payload, key, algorithm="HS256", headers=None, json_encoder=None, is_payload_detached=False, sort_headers=False):
+        
+        if headers and "alg" in headers:
+            algorithm = headers["alg"]
+
+        if algorithm not in self._algorithms:
+            raise NotImplementedError("Algorithm not supported")
+            
+        # Handle 'none' key
+        if algorithm == "none" and key is None:
+            key = b""
+
+        # Normalize payload
+        if isinstance(payload, dict):
+            payload = json.dumps(payload, cls=json_encoder, separators=(",", ":")).encode("utf-8")
+        elif isinstance(payload, str):
+            payload = payload.encode("utf-8")
+        
+        # Prepare Headers
+        final_headers = {"alg": algorithm, "typ": "JWT"}
+        if headers:
+            final_headers.update(headers)
+            
+        if "typ" in final_headers and not final_headers["typ"]:
+            del final_headers["typ"]
+        
+        # handle b64=False (Unencoded) -> Detached
+        if final_headers.get("b64") is False:
+            is_payload_detached = True
+        elif "b64" in final_headers:
+            # True is standard, remove to save space (matches PyJWT)
+            del final_headers["b64"]
+            
+        # Validate KID
+        if "kid" in final_headers and not isinstance(final_headers["kid"], str):
+             raise toke_rs.InvalidTokenError("Key ID header parameter must be a string")
+
+        headers_json = json.dumps(final_headers, cls=json_encoder, separators=(",", ":"), sort_keys=sort_headers)
+
+        # Handle "none" manually to avoid Rust error
+        if algorithm == "none":
+             header_b64 = toke_rs.base64url_encode(headers_json.encode('utf-8')).decode('utf-8')
+             if is_payload_detached:
+                 return f"{header_b64}.."
+             payload_b64 = toke_rs.base64url_encode(payload).decode('utf-8')
+             return f"{header_b64}.{payload_b64}."
+
+        token = toke_rs.sign(payload, key, algorithm, headers_json) 
+        
+        if is_payload_detached:
+            header, _, signature = token.split(".")
+            return f"{header}..{signature}"
+
+        return token
+
+
+    def decode_complete(self, token, key="", algorithms=None, options=None, detached_payload=None, **kwargs):
+        
+        # 1. Merge Options
+        merged_ops = self.options.copy()
+        if options: merged_ops.update(options)
+        
+        verify_sig = merged_ops.get("verify_signature", True)
+
+        # 2. Check Algorithms
+        if verify_sig and not algorithms:
+            if not isinstance(key, PyJWK):
+                raise toke_rs.DecodeError('It is required that you pass in a value for the "algorithms" argument when calling decode().')
+
+        # 3. Load & Parse
+        payload, signing_input, header, signature = self._load(token)
+
+        # 4. Handle Detached
+        if header.get("b64", True) is False:
+            if detached_payload is None:
+                raise toke_rs.DecodeError('It is required that you pass in a value for the "detached_payload" argument to decode a message having the b64 header set to false.')
+            payload = detached_payload
+            header_part = signing_input.rsplit(b".", 1)[0]
+            signing_input = header_part + b"." + payload
+        
+        elif detached_payload:
+             payload = detached_payload
+             payload_b64 = toke_rs.base64url_encode(payload)
+             signing_input = signing_input.split(b".")[0] + b"." + payload_b64
+
+        # 5. Verify
+        if verify_sig:
+            alg = header.get("alg")
+            if alg is None:
+                raise toke_rs.InvalidAlgorithmError("Algorithm not specified")
+            
+            if alg == "none":
+                if algorithms and "none" in algorithms:
+                    raise toke_rs.InvalidSignatureError("Signature verification failed")
+                else:
+                    raise toke_rs.InvalidAlgorithmError("Algorithm not supported")
+
+            if algorithms and alg not in algorithms:
+                raise toke_rs.InvalidAlgorithmError("The specified alg value is not allowed")
+
+            if isinstance(key, PyJWK):
+                if key.algorithm_name and key.algorithm_name != alg:
+                     raise toke_rs.InvalidAlgorithmError("The specified alg value is not allowed")
+                key_bytes = key
+            else:
+                key_bytes = key
+
+            # Reconstruct token string for Rust
+            sig_b64 = toke_rs.base64url_encode(signature).decode('utf-8')
+            token_str = signing_input.decode('utf-8') + "." + sig_b64
+            
+            verify_key = key_bytes if key_bytes is not None else b""
+            
+            try:
+                # [FIX] Use token_str instead of raw token
+                _, _ = toke_rs.verify(token_str, verify_key, alg)
+            except toke_rs.InvalidSignatureError:
+                raise toke_rs.InvalidSignatureError("Signature verification failed")
+            except ValueError as e:
+                # [FIX] Convert Rust unsupported alg error to PyJWT exception
+                if "Algorithm" in str(e) and "not supported" in str(e):
+                     raise toke_rs.InvalidAlgorithmError("Algorithm not supported")
+                raise e
+
+        return {
+            "payload": payload,
+            "header": header,
+            "signature": signature
+        }
+
+
+
 # -- Bind to main module, so it's not under toke.toke
 toke_rs.encode = encode
 toke_rs.decode = decode
@@ -244,5 +485,24 @@ toke_rs.decode_complete = decode_complete
 toke_rs.encode_async = encode_async
 toke_rs.decode_async = decode_async
 toke_rs._validate_iss = _validate_iss
-toke_rs.Toke = Toke
-toke_rs.PyJWT = Toke
+toke_rs.WebToken = WebToken
+
+toke_rs.PyJWT = WebToken
+toke_rs.PyJWS = PyJWS
+toke_rs.PyJWK = PyJWK
+toke_rs.PyJWKSet = PyJWKSet
+toke_rs.PyJWKError = PyJWKError
+toke_rs.PyJWKSetError = PyJWKSetError
+
+api_jws = types.ModuleType("toke.c")
+api_jws.PyJWS = PyJWS
+sys.modules["toke.api_jws"] = api_jws
+
+# algorithms_mod = types.ModuleType("toke.algorithms")
+# algorithms_mod.Algorithm = Algorithm # Export the shim
+# algorithms_mod.has_crypto = True 
+# sys.modules["toke.algorithms"] = algorithms_mod
+
+# toke_rs.api_jws = api_jws
+# toke_rs.algorithms = algorithms_mod
+

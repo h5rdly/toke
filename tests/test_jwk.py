@@ -7,13 +7,8 @@ sys.path.append(__file__.rsplit("/", 2)[0])
 import toke
 
 from toke import InvalidKeyError, PyJWKSetError, PyJWKError
-from toke import PyJWK, PyJWKSet
-from toke import algorithms
-
-RSAAlgorithm = algorithms.RSAAlgorithm
-ECAlgorithm = algorithms.ECAlgorithm
-HMACAlgorithm = algorithms.HMACAlgorithm
-OKPAlgorithm = algorithms.OKPAlgorithm
+from toke.api_jwk import PyJWK, PyJWKSet
+from toke.algorithms import RSAAlgorithm, ECAlgorithm, HMACAlgorithm, OKPAlgorithm
 
 
 # --- TESTS ---

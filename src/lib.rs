@@ -10,7 +10,7 @@ use jsonwebtoken::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyTypeError, PyValueError};
-use pyo3::types::{PyDict, PyModule};
+use pyo3::types::{PyBytes, PyDict, PyModule};
 use pyo3::{wrap_pyfunction, create_exception}; 
 use pythonize::{depythonize, pythonize};
 
@@ -18,7 +18,10 @@ use serde_json::{Value, Map};
 use serde::{Serialize, Deserialize};
 
 mod algorithms; 
-mod crypto; // Unified crypto module
+mod crypto; 
+mod jwk;
+mod jws;
+mod utils;
 
 mod pyjwt_algo_api;
 pub mod pyjwt_jwk_api;
@@ -42,10 +45,7 @@ create_exception!(toke, InvalidJTIError, InvalidTokenError);
 create_exception!(toke, InvalidSubjectError, InvalidTokenError);
 create_exception!(toke, InvalidAlgorithmError, InvalidTokenError);
 create_exception!(toke, InvalidKeyError, PyJWTError);
-
-create_exception!(toke, PyJWKSetError, PyJWTError); 
-create_exception!(toke, PyJWKError, PyJWTError);    
-
+    
 
 #[macro_export]
 macro_rules! err_loc {
@@ -114,6 +114,80 @@ fn get_registry() -> &'static RwLock<HashMap<String, Py<PyAny>>> {
     ALGORITHM_REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
+
+#[pyfunction]
+#[pyo3(signature = (payload, key, algorithm="HS256", headers=None))]
+fn sign(
+    payload: &Bound<'_, PyAny>, 
+    key: &Bound<'_, PyAny>, 
+    algorithm: &str, 
+    headers: Option<String>,
+) -> PyResult<String> {
+    
+    // 1. Extract Payload Bytes
+    let payload_bytes = if let Ok(s) = payload.extract::<String>() {
+        s.into_bytes()
+    } else if let Ok(b) = payload.extract::<Vec<u8>>() {
+        b
+    } else {
+        return Err(PyTypeError::new_err("Payload must be string or bytes"));
+    };
+
+    // 2. Parse Header JSON (Rust-side)
+    let header_val: Option<Value> = if let Some(json_str) = headers {
+        Some(serde_json::from_str(&json_str)
+            .map_err(|e| PyValueError::new_err(format!("Invalid header JSON: {}", e)))?)
+    } else {
+        None
+    };
+
+    // 3. Get Key Bytes
+    let key_bytes = get_key_bytes(key, algorithm, true)?;
+    
+    // 4. Sign
+    crate::jws::sign_bytes(&payload_bytes, &key_bytes, algorithm, header_val).map_err(Into::into)
+}
+
+
+#[pyfunction]
+#[pyo3(signature = (token, key, algorithm))]
+fn verify(
+    py: Python, 
+    token: &str, 
+    key: &Bound<'_, PyAny>, 
+    algorithm: &str
+) -> PyResult<(Py<PyAny>, Py<PyBytes>)> {
+    
+    let key_bytes = get_key_bytes(key, algorithm, false)?;
+
+    let (header, payload) = crate::jws::verify_bytes(token, &key_bytes, algorithm)
+        .map_err(Into::<PyErr>::into)?;
+
+    // Serialize Header to Python Object
+    let py_header_bound = pythonize::pythonize(py, &header)
+        .map_err(|e| PyValueError::new_err(format!("Header serialization failed: {}", e)))?;
+    
+    // Create Python Bytes
+    let py_payload_bound = PyBytes::new(py, &payload);
+
+    // [FIX] Convert Bound -> Py (Owned Pointer)
+    Ok((py_header_bound.unbind(), py_payload_bound.unbind()))
+}
+
+
+#[pyfunction]
+#[pyo3(signature = (key_data, algorithm=None))]
+fn load_jwk(key_data: &Bound<'_, PyAny>, algorithm: Option<String>) -> PyResult<PyJWK> {
+    crate::pyjwt_jwk_api::from_jwk(key_data, algorithm.as_deref().unwrap_or_default())
+}
+
+
+#[pyfunction]
+fn load_jwk_set(data: &Bound<'_, PyAny>) -> PyResult<PyJWKSet> {
+    crate::pyjwt_jwk_api::from_jwk_set(data)
+}
+
+
 #[pyfunction]
 pub fn register_algorithm(name: &str, provider: Py<PyAny>) {
     let map_lock = get_registry();
@@ -173,29 +247,6 @@ fn peek_algorithm(token: &str) -> PyResult<String> {
     Ok(header.alg)
 }
 
-fn get_decoding_key(key: &Bound<'_, PyAny>, alg_str: &str,) -> PyResult<DecodingKey> {
-    // 1. Check if it's a PyJWK object
-    if let Ok(jwk) = key.extract::<PyJWK>() {
-        return jwk.to_decoding_key().map_err(PyErr::from);
-    }
-
-    // 2. Otherwise, treat it as raw bytes/string (existing logic)
-    let key_bytes = get_key_bytes(key, alg_str, false)?;
-    
-    let alg = Algorithm::from_str(alg_str)
-        .map_err(|_| PyValueError::new_err("Unsupported algorithm"))?;
-
-    let decoding_key = if is_hmac(alg) {
-        DecodingKey::from_secret(&key_bytes)
-    } else {
-        DecodingKey::from_rsa_pem(&key_bytes)
-            .or_else(|_| DecodingKey::from_ec_pem(&key_bytes))
-            .or_else(|_| DecodingKey::from_ed_pem(&key_bytes))
-            .map_err(|e| PyValueError::new_err(format!("Invalid PEM key: {}", e)))?
-    };
-
-    Ok(decoding_key)
-}
 
 fn get_key_bytes(
     key: &Bound<'_, PyAny>, 
@@ -203,7 +254,11 @@ fn get_key_bytes(
     is_signing: bool
 ) -> PyResult<Vec<u8>> {
     
-    // A. Extract Raw Bytes (Python -> Rust)
+    if let Ok(jwk) = key.extract::<PyJWK>() {
+        return jwk.to_key_bytes(); 
+    }
+
+    // Extract Raw Bytes (Python -> Rust)
     let key_bytes = if let Ok(s) = key.extract::<String>() {
         s.into_bytes()
     } else if let Ok(b) = key.extract::<Vec<u8>>() {
@@ -212,11 +267,11 @@ fn get_key_bytes(
         return Err(PyTypeError::new_err("Key must be string or bytes"));
     };
 
-    // B. Check Routing
+    // Check Routing
     let is_external = ExternalAlgorithm::from_str(alg_name).is_some();
     if is_external { return Ok(key_bytes); }
 
-    // C. Standard Checks
+    // Standard Checks
     let alg = Algorithm::from_str(alg_name)
         .map_err(|_| PyValueError::new_err(err_loc!("Algorithm '{}' not supported", alg_name)))?;
 
@@ -240,6 +295,33 @@ fn get_key_bytes(
 
     Ok(key_bytes)
 }
+
+
+fn get_decoding_key(key: &Bound<'_, PyAny>, alg_str: &str,) -> PyResult<DecodingKey> {
+
+    // 1. Check if it's a PyJWK object
+    if let Ok(jwk) = key.extract::<PyJWK>() {
+        return jwk.to_decoding_key().map_err(PyErr::from);
+    }
+
+    // 2. Otherwise, treat it as raw bytes/string (existing logic)
+    let key_bytes = get_key_bytes(key, alg_str, false)?;
+    
+    let alg = Algorithm::from_str(alg_str)
+        .map_err(|_| PyValueError::new_err("Unsupported algorithm"))?;
+
+    let decoding_key = if is_hmac(alg) {
+        DecodingKey::from_secret(&key_bytes)
+    } else {
+        DecodingKey::from_rsa_pem(&key_bytes)
+            .or_else(|_| DecodingKey::from_ec_pem(&key_bytes))
+            .or_else(|_| DecodingKey::from_ed_pem(&key_bytes))
+            .map_err(|e| PyValueError::new_err(format!("Invalid PEM key: {}", e)))?
+    };
+
+    Ok(decoding_key)
+}
+
 
 fn extract_aud_iss(
     audience: Option<&Bound<'_, PyAny>>,
@@ -289,15 +371,23 @@ fn prepare_validation(
     let mut check_iss = true;
 
     if let Some(opts) = options {
-        if let Ok(Some(v)) = opts.get_item("verify_exp") { validation.validate_exp = v.extract()?; }
-        if let Ok(Some(v)) = opts.get_item("verify_nbf") { validation.validate_nbf = v.extract()?; }
-        if let Ok(Some(v)) = opts.get_item("verify_aud") { check_aud = v.extract()?; } 
-        if let Ok(Some(v)) = opts.get_item("verify_iss") { check_iss = v.extract()?; } 
-        if let Ok(Some(v)) = opts.get_item("leeway") { validation.leeway = v.extract()?; }
-        if let Ok(Some(req_list)) = opts.get_item("require") {
-            if let Ok(reqs) = req_list.extract::<Vec<String>>() {
-                for r in reqs { validation.required_spec_claims.insert(r); }
-            }
+
+        macro_rules! update {
+            ($key:literal, $target:expr) => {
+                if let Some(val) = opts.get_item($key)? {
+                    $target = val.extract()?;
+                }
+            };
+        }
+
+        update!("verify_exp", validation.validate_exp);
+        update!("verify_nbf", validation.validate_nbf);
+        update!("verify_aud", check_aud);
+        update!("verify_iss", check_iss);
+        update!("leeway", validation.leeway);
+
+        if let Some(val) = opts.get_item("require")? {
+            validation.required_spec_claims.extend(val.extract::<Vec<String>>()?);
         }
     }
     
@@ -592,12 +682,9 @@ fn decode<'py>(
         return pythonize(py, &claims).map_err(|e| PyValueError::new_err(format!("Output failed: {}", e)));
     }
 
-    // [FIX] 1. Check if External Algorithm BEFORE trying to make a DecodingKey
     let is_external = ExternalAlgorithm::from_str(&alg_str).is_some();
     
     if is_external {
-         // Get raw key bytes (PyJWK -> Bytes not strictly supported for Ext yet, but strings/bytes work)
-         // Note: get_key_bytes doesn't use 'alg' to parse strict types, so it's safe for Ext algos.
          let key_bytes = if effective_verify {
             match key {
                 Some(k) => get_key_bytes(k, &alg_str, false)?,
@@ -625,7 +712,6 @@ fn decode<'py>(
         return pythonize(py, &claims).map_err(|e| PyValueError::new_err(format!("Output failed: {}", e)));
     }
     
-    // Branch: Custom Plugin
     if let Some(_plugin) = get_algorithm(py, &alg_str) {
         let claims = py.detach(move || -> PyResult<Value> {
              Err(PyValueError::new_err("Plugin logic")) 
@@ -633,7 +719,6 @@ fn decode<'py>(
         return pythonize(py, &claims).map_err(Into::into);
     } 
 
-    // [FIX] 2. Standard Branch: Now safe to call get_decoding_key (validates JWK/PEM against std curves)
     let decoding_key = if effective_verify {
         match key {
             Some(k) => Some(get_decoding_key(k, &alg_str)?), 
@@ -685,12 +770,10 @@ fn decode_complete<'py>(py: Python<'py>, token: &str, key: Option<&Bound<'py, Py
         expected_iss = Some(s);
     }
 
-    // [FIX] Same logic for decode_complete
     let is_external = ExternalAlgorithm::from_str(&alg_str).is_some();
     if is_external {
-        // ... (External path for decode_complete left as exercise or fallback to standard if verification done)
-        // For now, assuming standard verify is enough to test flow, but strictly we should duplicate the logic.
-        // Or refactor to share. Given the constraints, let's just error or assume verify pass for now.
+        // For now, assuming standard verify is enough to test flow, but strictly we should duplicate 
+        // or refactor
     }
 
     let decoding_key = if effective_verify {
@@ -737,6 +820,31 @@ fn unsafe_peek<'py>(py: Python<'py>, token: &str) -> PyResult<Bound<'py, PyAny>>
 
 
 
+// Register a submodule and add it to sys.modules 
+fn add_submodule_with_sys(
+    py: Python, 
+    parent: &Bound<'_, PyModule>, 
+    name: &str, 
+    setup_fn: impl FnOnce(Python, &Bound<'_, PyModule>) -> PyResult<()>
+) -> PyResult<()> {
+    // 1. Create the submodule
+    let submod = PyModule::new(py, name)?;
+    
+    // 2. Run the setup (add classes, functions)
+    setup_fn(py, &submod)?;
+    
+    // 3. Add to parent (allows `toke.jwk`)
+    parent.add_submodule(&submod)?;
+    
+    // 4. Add to sys.modules (allows `from toke.jwk import ...`)
+    let parent_name = parent.name()?;
+    let full_name = format!("{}.{}", parent_name, name);
+    py.import("sys")?.getattr("modules")?.set_item(full_name, &submod)?;
+    
+    Ok(())
+}
+
+
 #[pymodule]
 fn toke(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("PyJWTError", py.get_type::<PyJWTError>())?;
@@ -752,11 +860,10 @@ fn toke(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("InvalidJTIError", py.get_type::<InvalidJTIError>())?;
     m.add("InvalidSubjectError", py.get_type::<InvalidSubjectError>())?;
     m.add("InvalidKeyError", py.get_type::<InvalidKeyError>())?;
-    
-    m.add("PyJWKSetError", py.get_type::<PyJWKSetError>())?; 
-    m.add("PyJWKError", py.get_type::<PyJWKError>())?;       
+    m.add("InvalidAlgorithmError", py.get_type::<InvalidAlgorithmError>())?;
 
-
+    m.add_function(wrap_pyfunction!(sign, m)?)?;
+    m.add_function(wrap_pyfunction!(verify, m)?)?;
     m.add_function(wrap_pyfunction!(encode, m)?)?;
     m.add_function(wrap_pyfunction!(decode, m)?)?;
     m.add_function(wrap_pyfunction!(decode_complete, m)?)?;
@@ -765,13 +872,18 @@ fn toke(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(register_algorithm, m)?)?;
     m.add_function(wrap_pyfunction!(unregister_algorithm, m)?)?;
 
-    crypto::export_functions(m)?; // Unified crypto export
+    m.add_function(wrap_pyfunction!(load_jwk, m)?)?;
+    m.add_function(wrap_pyfunction!(load_jwk_set, m)?)?; 
 
-    // PyJWT compat related
-    m.add_class::<PyJWK>()?;
-    m.add_class::<PyJWKSet>()?;
-    pyjwt_jwk_api::register_jwk_module(py, m)?;
-    pyjwt_algo_api::register_compat_module(py, m)?;
+    crypto::export_functions(m)?; // Unified crypto export
+    utils::export_utils(m)?;
+
+    add_submodule_with_sys(py, m, "api_jwk", |_py, mod_| {
+        pyjwt_jwk_api::register_jwk_module(py, mod_)
+    })?;
+    add_submodule_with_sys(py, m, "algorithms", |_py, mod_| {
+        pyjwt_algo_api::register_algo_module(mod_)
+    })?;
 
     Ok(())
 }

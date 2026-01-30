@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 sys.path.append(__file__.rsplit("/", 2)[0])
 
 import toke as jwt
+from toke import base64url_encode, base64url_decode, generate_key_pair
 from toke import (
     DecodeError,
     ExpiredSignatureError,
@@ -20,34 +21,9 @@ from toke import (
 
 import pytest
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, ec
 
-def generate_rsa_key():
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-    pub = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    return pem, pub
-
-def generate_ec_key():
-    key = ec.generate_private_key(ec.SECP256R1())
-    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-    pub = key.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    return pem, pub
-
-RSA_PRIV, RSA_PUB = generate_rsa_key()
-EC_PRIV, EC_PUB = generate_ec_key()
-
-#-  This resides in jwt.utils
-def base64url_encode(input: bytes) -> bytes:
-    return base64.urlsafe_b64encode(input).replace(b"=", b"")
-
-def base64url_decode(input):
-
-    if isinstance(input, str): input = input.encode("ascii")
-    rem = len(input) % 4
-    if rem > 0: input += b"=" * (4 - rem)
-    return base64.urlsafe_b64decode(input)
+RSA_PRIV, RSA_PUB = generate_key_pair("RS256")
+EC_PRIV, EC_PUB = generate_key_pair("ES256")
 
 
 #-  Test utils

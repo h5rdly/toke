@@ -1,14 +1,17 @@
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::jwk::{Jwk as RustJwk, };
-
 use pyo3::prelude::*;
-use pyo3::exceptions::{PyValueError, PyKeyError, };
+use pyo3::{create_exception}; 
 use pyo3::types::{PyDict, PyList};
+use pyo3::exceptions::{PyValueError, PyKeyError};
 
 use pythonize::depythonize;
 use serde_json::Value; 
-// [FIX] Added InvalidKeyError to imports
-use crate::{TokeError, PyJWKSetError, InvalidKeyError}; 
+
+use crate::{TokeError, PyJWTError};
+use crate::jwk; 
+
+create_exception!(toke, PyJWKSetError, PyJWTError); 
+create_exception!(toke, PyJWKError, PyJWTError);
+
 
 #[pyclass(name = "PyJWK")]
 #[derive(Clone)]
@@ -17,63 +20,32 @@ pub struct PyJWK {
     pub algorithm_name: Option<String>,
 }
 
+
 #[pymethods]
 impl PyJWK {
     #[new]
     #[pyo3(signature = (jwk_data, algorithm=None))]
     fn new(jwk_data: &Bound<'_, PyDict>, algorithm: Option<String>) -> PyResult<Self> {
-        let inner: Value = depythonize(jwk_data)
+        let raw: Value = depythonize(jwk_data)
             .map_err(|e| PyValueError::new_err(format!("Invalid JWK data: {}", e)))?;
+        let (inner, alg) = jwk::normalize(raw, algorithm).map_err(PyValueError::new_err)?;
 
-        if !inner.is_object() {
-             return Err(PyValueError::new_err("JWK must be an object"));
-        }
-        if inner.get("kty").is_none() {
-             return Err(PyValueError::new_err("Key type (kty) not found"));
-        }
-
-        let alg = if let Some(a) = algorithm {
-            Some(a)
-        } else if let Some(key_alg) = inner.get("alg").and_then(|v| v.as_str()) {
-            Some(key_alg.to_string()) 
-        } else {
-            deduce_algorithm(&inner)?
-        };
-
-        Ok(PyJWK {
-            inner,
-            algorithm_name: alg,
-        })
-    }
-
-    #[staticmethod]
-    #[pyo3(signature = (obj, algorithm=None))]
-    pub fn from_dict(obj: &Bound<'_, PyDict>, algorithm: Option<String>) -> PyResult<Self> {
-        Self::new(obj, algorithm)
+        Ok(PyJWK { inner, algorithm_name: alg })
     }
 
     #[staticmethod]
     #[pyo3(signature = (data, algorithm=None))]
     pub fn from_json(data: &str, algorithm: Option<String>) -> PyResult<Self> {
-        let inner: Value = serde_json::from_str(data)
-            .map_err(|e| PyValueError::new_err(format!("Invalid JWK JSON: {}", e)))?;
-        
-        if !inner.is_object() {
-             return Err(PyValueError::new_err("JWK must be an object"));
-        }
-        if inner.get("kty").is_none() {
-             return Err(PyValueError::new_err("Key type (kty) not found"));
-        }
-
-        let alg = if let Some(a) = algorithm {
-            Some(a)
-        } else if let Some(key_alg) = inner.get("alg").and_then(|v| v.as_str()) {
-            Some(key_alg.to_string())
-        } else {
-            deduce_algorithm(&inner)?
-        };
+        let raw = jwk::parse_json(data).map_err(PyValueError::new_err)?;
+        let (inner, alg) = jwk::normalize(raw, algorithm).map_err(PyValueError::new_err)?;
 
         Ok(PyJWK { inner, algorithm_name: alg })
+    }
+    
+    #[staticmethod]
+    #[pyo3(signature = (obj, algorithm=None))]
+    pub fn from_dict(obj: &Bound<'_, PyDict>, algorithm: Option<String>) -> PyResult<Self> {
+        Self::new(obj, algorithm)
     }
 
     #[getter]
@@ -101,44 +73,14 @@ impl PyJWK {
     }
 }
 
-fn deduce_algorithm(jwk: &Value) -> PyResult<Option<String>> {
-    let kty = jwk.get("kty").and_then(|v| v.as_str()).ok_or_else(|| PyValueError::new_err("kty missing"))?;
-    
-    match kty {
-        "EC" => {
-            let crv = jwk.get("crv").and_then(|v| v.as_str()).ok_or_else(|| PyValueError::new_err("crv missing for EC key"))?;
-            match crv {
-                "P-256" => Ok(Some("ES256".to_string())),
-                "P-384" => Ok(Some("ES384".to_string())),
-                "P-521" => Ok(Some("ES512".to_string())),
-                "secp256k1" => Ok(Some("ES256K".to_string())),
-                _ => Err(PyValueError::new_err(format!("Unsupported crv: {}", crv)))
-            }
-        },
-        "RSA" => Ok(Some("RS256".to_string())),
-        "oct" => Ok(Some("HS256".to_string())),
-        "OKP" => {
-             let crv = jwk.get("crv").and_then(|v| v.as_str()).ok_or_else(|| PyValueError::new_err("crv missing for OKP"))?;
-             if crv == "Ed25519" || crv == "Ed448" {
-                 Ok(Some("EdDSA".to_string()))
-             } else {
-                 Err(PyValueError::new_err(format!("Unsupported crv for OKP: {}", crv)))
-             }
-        },
-        // [FIX] Strictly reject unknown key types to match PyJWT tests
-        other => Err(InvalidKeyError::new_err(format!("Unknown key type: {}", other)))
-    }
-}
-
+// Internal helpers needed by lib.rs (Delegating to core)
 impl PyJWK {
-    pub(crate) fn to_decoding_key(&self) -> Result<DecodingKey, TokeError> {
-        // Warning: This will fail for secp256k1 keys because upstream 'jwk' crate is strict.
-        // If we need support, we must parse manually or patch upstream.
-        // For standard keys, it works via serde roundtrip.
-        let json_str = serde_json::to_string(&self.inner).map_err(|e| TokeError::Generic(e.to_string()))?;
-        let rust_jwk: RustJwk = serde_json::from_str(&json_str)
-            .map_err(|e| TokeError::Generic(format!("JWK parsing failed: {}", e)))?;
-        DecodingKey::from_jwk(&rust_jwk).map_err(TokeError::Jwt)
+    pub(crate) fn to_decoding_key(&self) -> Result<jsonwebtoken::DecodingKey, TokeError> {
+        jwk::to_decoding_key(&self.inner)
+    }
+
+    pub(crate) fn to_key_bytes(&self) -> PyResult<Vec<u8>> {
+        jwk::extract_key_bytes(&self.inner).map_err(PyValueError::new_err)
     }
 }
 
@@ -149,36 +91,36 @@ pub struct PyJWKSet {
 
 #[pymethods]
 impl PyJWKSet {
+
     #[new]
     #[pyo3(signature = (keys))]
     fn new(keys: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let list = keys.extract::<Bound<'_, PyList>>()
-        .map_err(|_| {PyJWKSetError::new_err("Invalid JWK Set value") })?;
-
-        let mut py_keys = Vec::new();
-        for item in list.iter() {
-            if let Ok(dict) = item.cast::<PyDict>() {
-                // Ignore errors for individual keys in a set (PyJWT behavior)
-                if let Ok(jwk) = PyJWK::new(dict, None) {
-                    if let Some(u) = jwk.public_key_use() {
-                        if u == "enc" { continue; }
-                    }
-                    py_keys.push(jwk);
-                }
-            }
-        }
-        
-        if py_keys.is_empty() {
-            return Err(PyJWKSetError::new_err("The JWK Set did not contain any usable keys"));
-        }
-
-        Ok(PyJWKSet { keys: py_keys })
+        // Convert Python List -> Rust Vec<Value>
+        let raw_list: Vec<Value> = depythonize(keys)
+            .map_err(|_| PyJWKSetError::new_err("Invalid JWK Set value"))?;
+            
+        Self::from_values(raw_list)
     }
+
 
     #[getter]
     fn keys(&self) -> Vec<PyJWK> {
         self.keys.clone()
     }
+
+
+    #[staticmethod]
+    fn from_json(data: &str) -> PyResult<Self> {
+        let val = jwk::parse_json(data).map_err(PyValueError::new_err)?;
+        
+        let keys_array = val.get("keys")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| PyValueError::new_err("JWK Set must have a 'keys' array"))?
+            .clone();
+
+        Self::from_values(keys_array)
+    }
+
 
     #[staticmethod]
     fn from_dict(obj: &Bound<'_, PyDict>) -> PyResult<Self> {
@@ -186,43 +128,8 @@ impl PyJWKSet {
             .map_err(|_| PyValueError::new_err("JWK Set must have a 'keys' key"))?
             .ok_or_else(|| PyValueError::new_err("JWK Set 'keys' is None"))?;
             
+        // Delegate to new() to handle the list conversion
         Self::new(&keys)
-    }
-
-    #[staticmethod]
-    fn from_json(data: &str) -> PyResult<Self> {
-        let set_val: Value = serde_json::from_str(data)
-            .map_err(|e| PyValueError::new_err(format!("Invalid JWK Set JSON: {}", e)))?;
-            
-        let keys_array = set_val.get("keys")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| PyValueError::new_err("JWK Set must have a 'keys' array"))?;
-
-        let mut keys = Vec::new();
-        for k in keys_array {
-            let alg = if let Some(ka) = k.get("alg").and_then(|v| v.as_str()) {
-                Some(ka.to_string())
-            } else {
-                deduce_algorithm(k).ok().flatten()
-            };
-            
-            // For Set loading, we often want to skip invalid keys instead of crashing the whole set
-            // But if deduce_algorithm fails, we skip this key.
-            if let Ok(Some(_)) | Ok(None) = deduce_algorithm(k) {
-                 let py_jwk = PyJWK { inner: k.clone(), algorithm_name: alg };
-                 
-                 if let Some(u) = py_jwk.public_key_use() {
-                    if u == "enc" { continue; }
-                 }
-                 keys.push(py_jwk);
-            }
-        }
-
-        if keys.is_empty() {
-             return Err(PyJWKSetError::new_err("The JWK Set did not contain any usable keys"));
-        }
-
-        Ok(PyJWKSet { keys })
     }
 
     fn __getitem__(&self, kid: String) -> PyResult<PyJWK> {
@@ -252,6 +159,53 @@ impl PyJWKSet {
     }
 }
 
+
+impl PyJWKSet {
+    fn from_values(values: Vec<Value>) -> PyResult<Self> {
+        let valid_keys = jwk::normalize_key_set(values);
+        
+        if valid_keys.is_empty() {
+             return Err(PyJWKSetError::new_err("The JWK Set did not contain any usable keys"));
+        }
+
+        let py_keys = valid_keys.into_iter()
+            .map(|(inner, alg)| PyJWK { inner, algorithm_name: alg })
+            .collect();
+
+        Ok(PyJWKSet { keys: py_keys })
+    }
+}
+
+
+pub fn from_jwk(jwk: &Bound<'_, PyAny>, algorithm_hint: &str) -> PyResult<PyJWK> {
+    if let Ok(s) = jwk.extract::<String>() {
+         PyJWK::from_json(&s, Some(algorithm_hint.to_string()))
+    } else if let Ok(d) = jwk.extract::<Bound<'_, PyDict>>() {
+         PyJWK::from_dict(&d, Some(algorithm_hint.to_string()))
+    } else {
+         use pyo3::exceptions::PyTypeError;
+         Err(PyTypeError::new_err("Expected string or dict"))
+    }
+}
+
+
+pub fn from_jwk_set(data: &Bound<'_, PyAny>) -> PyResult<PyJWKSet> {
+    if let Ok(s) = data.extract::<String>() {
+        // Handle JSON String
+        PyJWKSet::from_json(&s)
+    } else if let Ok(d) = data.extract::<Bound<'_, PyDict>>() {
+        // Handle Dict (e.g. {"keys": [...]})
+        PyJWKSet::from_dict(&d)
+    } else if let Ok(_l) = data.extract::<Bound<'_, PyList>>() {
+        // Handle List directly (e.g. [key1, key2]) - effectively calling new()
+        PyJWKSet::new(data)
+    } else {
+        use pyo3::exceptions::PyTypeError;
+        Err(PyTypeError::new_err("Expected string, dict, or list of keys"))
+    }
+}
+
+
 #[pyclass]
 struct PyJWKSetIterator {
     iter: std::vec::IntoIter<PyJWK>,
@@ -268,11 +222,13 @@ impl PyJWKSetIterator {
     }
 }
 
-pub fn register_jwk_module(py: Python, parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn register_jwk_module(py: Python, parent_module: &Bound<'_, PyModule>) -> PyResult<()> {   
+    parent_module.add("PyJWKSetError", py.get_type::<PyJWKSetError>())?; 
+    parent_module.add("PyJWKError", py.get_type::<PyJWKError>())?;  
+
     parent_module.add_class::<PyJWKSetIterator>()?;
-    let jwk_module = PyModule::new(py, "jwk")?;
-    jwk_module.add_class::<PyJWK>()?;
-    jwk_module.add_class::<PyJWKSet>()?;
-    parent_module.add_submodule(&jwk_module)?;
+    parent_module.add_class::<PyJWK>()?;
+    parent_module.add_class::<PyJWKSet>()?;
+    
     Ok(())
 }
