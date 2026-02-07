@@ -2,13 +2,13 @@ import json
 import sys
 import pytest
 
-# Ensure we can import the local toke module
+# Ensure we can import the local webtoken module
 sys.path.append(__file__.rsplit("/", 2)[0])
-import toke
+import webtoken
 
-from toke import InvalidKeyError, PyJWKSetError, PyJWKError
-from toke.api_jwk import PyJWK, PyJWKSet
-from toke.algorithms import RSAAlgorithm, ECAlgorithm, HMACAlgorithm, OKPAlgorithm
+from webtoken import InvalidKeyError, PyJWKSetError, PyJWKError
+from webtoken.api_jwk import PyJWK, PyJWKSet
+from webtoken.algorithms import RSAAlgorithm, ECAlgorithm, HMACAlgorithm, OKPAlgorithm
 
 
 # --- TESTS ---

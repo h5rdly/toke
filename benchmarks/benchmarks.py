@@ -3,7 +3,7 @@ import asyncio, sys, time
 import jwt
 
 sys.path.append(__file__.rsplit("/", 2)[0])
-import toke
+import webtoken
 
 
 def benchmark(iterations=100):
@@ -49,24 +49,24 @@ def benchmark(iterations=100):
         if is_symmetric:
             priv, pub = "secret", "secret"
         else:
-            priv_bytes, pub_bytes = toke.generate_key_pair(alg_name)
+            priv_bytes, pub_bytes = webtoken.generate_key_pair(alg_name)
             # PyJWT prefers strings
             priv, pub = priv_bytes.decode('utf-8'), pub_bytes.decode('utf-8')
 
         # Encode
-        toke_enc_func = lambda: toke.encode(payload, priv, algorithm=alg_name)
+        webtoken_enc_func = lambda: webtoken.encode(payload, priv, algorithm=alg_name)
         has_pyjwt = alg_name not in ["ML-DSA-65", "ES256K", "ML-DSA-44", "ML-DSA-87"]
         pyjwt_enc_func = (lambda: jwt.encode(payload, priv, algorithm=alg_name)) if has_pyjwt else None
         
-        t_enc = run_bench("Toke Encode", toke_enc_func)
+        t_enc = run_bench("Toke Encode", webtoken_enc_func)
         p_enc = run_bench("PyJWT Encode", pyjwt_enc_func)
 
         # Decode
-        token = toke.encode(payload, priv, algorithm=alg_name)
-        toke_dec_func = lambda: toke.decode(token, pub, algorithms=[alg_name])
+        token = webtoken.encode(payload, priv, algorithm=alg_name)
+        webtoken_dec_func = lambda: webtoken.decode(token, pub, algorithms=[alg_name])
         pyjwt_dec_func = (lambda: jwt.decode(token, pub, algorithms=[alg_name])) if has_pyjwt else None
         
-        t_dec = run_bench("Toke Decode", toke_dec_func, )
+        t_dec = run_bench("Toke Decode", webtoken_dec_func, )
         p_dec = run_bench("PyJWT Decode", pyjwt_dec_func, )
 
         res = []

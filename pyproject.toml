@@ -11,3 +11,9 @@ requires-python = ">=3.11"
 
 [tool.maturin]
 features = ["pyo3/extension-module", "pyo3/abi3-py311"]
+
+# Ignore "key too short" warnings when running tests
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore"
+]

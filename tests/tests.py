@@ -3,7 +3,7 @@ import asyncio, sys, time, json, os, decimal
 import jwt
 
 sys.path.append(__file__.rsplit("/", 2)[0])
-import toke
+import webtoken
 
 
 def _check_algo(alg, payload):
@@ -11,7 +11,7 @@ def _check_algo(alg, payload):
 
     try:
         # 1. Generate Key
-        priv_bytes, pub_bytes = toke.generate_key_pair(alg)
+        priv_bytes, pub_bytes = webtoken.generate_key_pair(alg)
         
         if alg in ["ML-DSA-65", "ML-DSA-44", "ML-DSA-87"]:
             priv = priv_bytes.decode("utf-8")
@@ -21,13 +21,13 @@ def _check_algo(alg, payload):
             pub = pub_bytes.decode("utf-8")
 
         # 2. Encode
-        token = toke.encode(payload, priv, algorithm=alg)
-        if not toke or not isinstance(token, str):
+        token = webtoken.encode(payload, priv, algorithm=alg)
+        if not isinstance(token, str):
             print(f"❌ {alg} failed - got token {token}")
             return
 
         # 3. Decode
-        decoded = toke.decode(token, pub, algorithms=[alg])
+        decoded = webtoken.decode(token, pub, algorithms=[alg])
         
         # 4. Assert Consistency
         assert decoded["sub"] == payload["sub"]
@@ -48,8 +48,8 @@ payload = {
 def test_hs256():
     # Symmetric is special (key is just a string/bytes)
     key = "super_secret_key_bytes"
-    token = toke.encode(payload, key, algorithm="HS256")
-    decoded = toke.decode(token, key, algorithms=["HS256"])
+    token = webtoken.encode(payload, key, algorithm="HS256")
+    decoded = webtoken.decode(token, key, algorithms=["HS256"])
     assert decoded["sub"] == payload["sub"]
 
 def test_rs256(): _check_algo("RS256", payload)
@@ -64,11 +64,11 @@ def test_expired_token():
     
     print("--- Testing Expired Token ---")
     payload = {"sub": "test", "exp": int(time.time()) - 10}
-    token = toke.encode(payload, "secret", algorithm="HS256")
+    token = webtoken.encode(payload, "secret", algorithm="HS256")
 
     try:
-        res = toke.decode(token, "secret", algorithms=["HS256"])
-    except toke.ExpiredSignatureError:
+        res = webtoken.decode(token, "secret", algorithms=["HS256"])
+    except webtoken.ExpiredSignatureError:
         print("✅ Caught correct specific exception!")
     except ValueError:
         print("❌ Caught generic ValueError (Bad for drop-in replacement)")
@@ -80,10 +80,10 @@ def test_unverified_header():
 
     print("--- Testing Header Extraction ---")
     secret = "secret"
-    token = toke.encode({"sub": "1"}, secret, algorithm="HS256", headers={"kid": "key_1"})
+    token = webtoken.encode({"sub": "1"}, secret, algorithm="HS256", headers={"kid": "key_1"})
 
     try:
-        header = toke.get_unverified_header(token)
+        header = webtoken.get_unverified_header(token)
         print(f"✅ Header extracted: {header}")
         assert header['kid'] == 'key_1'
         assert header['alg'] == 'HS256'
@@ -96,7 +96,7 @@ def test_detached_header():
     #- Test detached JWS (header..signature)
     # Creating a real token and removing the payload part
     full_payload = {"sub": "detached_test"}
-    full_token = toke.encode(full_payload, "secret", algorithm="HS256")
+    full_token = webtoken.encode(full_payload, "secret", algorithm="HS256")
     header, _, signature = full_token.split(".")
     detached_token = f"{header}..{signature}"
 
@@ -106,14 +106,14 @@ def test_detached_header():
     content = json.dumps(full_payload, separators=(",", ":")).encode('utf-8') # b'{"sub": "detached_test"}'
 
     try:
-        decoded = toke.decode(detached_token, "secret", algorithms=["HS256"], content=content)
+        decoded = webtoken.decode(detached_token, "secret", algorithms=["HS256"], content=content)
         print(f"✅ Success! Claims: {decoded}")
     except Exception as e:
         print(f"❌ Failed: {e}")
 
     # 3. Verify failure if we provide content to a non-detached token
     try:
-        toke.decode(full_token, "secret", algorithms=["HS256"], content=content)
+        webtoken.decode(full_token, "secret", algorithms=["HS256"], content=content)
     except Exception as e:
         print(f"✅ Correctly rejected double payload: {e}")
 
@@ -122,10 +122,10 @@ def test_list_in_claims():
 
     print("\n--- Testing List Claims ---")
     payload = {"sub": "1", "aud": ["service_a", "service_b"]}
-    token = toke.encode(payload, "secret")
+    token = webtoken.encode(payload, "secret")
     try:
         # Verify we can decode with one of the audiences
-        toke.decode(token, "secret", audience="service_b", algorithms=["HS256"])
+        webtoken.decode(token, "secret", audience="service_b", algorithms=["HS256"])
         print("✅ List audience validated successfully")
     except Exception as e:
         print(f"❌ Failed list audience: {e}")
@@ -136,8 +136,7 @@ def test_type_coercion():
     print("\n--- Testing Custom Types ---")
     try:
         # PyJWT handles this if you pass a custom encoder, but fails by default.
-        # Toke will likely fail immediately because pythonize doesn't know what a 'set' is in JSON.
-        toke.encode({"tags": {1, 2, 3}}, secret) 
+        webtoken.encode({"tags": {1, 2, 3}}, secret) 
         print("❓ Set serialization worked (unexpected)")
     except Exception as e:
         print(f"ℹ️ Set serialization failed as expected (Rust strictness): {e}")
@@ -150,7 +149,7 @@ def test_none_as_algorithm():
 
     # 1. Encode with 'none'
     try:
-        none_token = toke.encode({"sub": "unsecured"}, None, algorithm="none")
+        none_token = webtoken.encode({"sub": "unsecured"}, None, algorithm="none")
         print(f"✅ 'none' algorithm encoded successfully: {none_token[:15]}...")
     except Exception as e:
         print(f"❌ 'none' encoding failed: {e}")
@@ -158,9 +157,9 @@ def test_none_as_algorithm():
     if none_token:
         # 2. Decode 'none' token WITHOUT permission (Should FAIL)
         try:
-            toke.decode(none_token, None)
+            webtoken.decode(none_token, None)
             print("❌ Security Risk: 'none' token accepted without explicit permission")
-        except toke.InvalidTokenError:
+        except webtoken.InvalidTokenError:
             print("✅ 'none' token correctly rejected by default")
         except Exception as e:
             print(f"✅ 'none' token rejected (caught {type(e).__name__}): {e}")
@@ -168,7 +167,7 @@ def test_none_as_algorithm():
         # 3. Decode 'none' token WITH permission (Should SUCCEED)
         try:
             # Note: verify=False is often required for 'none' depending on exact semantics
-            decoded = toke.decode(none_token, None, algorithms=["none"], verify=False)
+            decoded = webtoken.decode(none_token, None, algorithms=["none"], verify=False)
             print(f"✅ 'none' token decoded with explicit permission: {decoded}")
         except Exception as e:
             print(f"❌ Failed to decode 'none' even with permission: {e}")
@@ -195,11 +194,11 @@ def test_custom_json_encoder():
 
     try:
         # 1. Encode with custom encoder
-        token = toke.encode(payload, "secret", json_encoder=CustomEncoder)
+        token = webtoken.encode(payload, "secret", json_encoder=CustomEncoder)
         print(f"✅ Encoded with custom types: {token[:15]}...")
 
         # 2. Decode and verify
-        decoded = toke.decode(token, "secret", algorithms=["HS256"])
+        decoded = webtoken.decode(token, "secret", algorithms=["HS256"])
         print(f"✅ Decoded Payload: {decoded}")
         
         # Assertions
@@ -216,9 +215,9 @@ def test_custom_json_encoder():
 def test_file_key_loading():
     print("\n--- Testing Key Loading from Files ---")
     
-    # 1. Generate valid PEM keys using Toke
+    # Generate valid PEM keys 
     # (returns bytes in standard PKCS#8 / SPKI format)
-    priv_pem, pub_pem = toke.generate_key_pair("RS256")
+    priv_pem, pub_pem = webtoken.generate_key_pair("RS256")
     
     filename_priv = "temp_test_key.pem"
     filename_pub = "temp_test_key.pub"
@@ -242,11 +241,11 @@ def test_file_key_loading():
         
         # 4. Encode using the loaded Private Key
         payload = {"sub": "file_system_user"}
-        token = toke.encode(payload, loaded_priv, algorithm="RS256")
+        token = webtoken.encode(payload, loaded_priv, algorithm="RS256")
         print(f"✅ Encoded Token: {token[:20]}...")
 
         # 5. Decode using the loaded Public Key
-        decoded = toke.decode(token, loaded_pub, algorithms=["RS256"])
+        decoded = webtoken.decode(token, loaded_pub, algorithms=["RS256"])
         assert decoded["sub"] == "file_system_user"
         print(f"✅ Decoded Payload: {decoded}")
 
@@ -258,9 +257,9 @@ def test_file_key_loading():
 
 def test_using_class(algorithm="HS256"):
 
-    toker = toke.PyJWT()
+    toker = webtoken.PyJWT()
     token = toker.encode({"sub": "1"}, "secret", algorithm=algorithm)
-    res = toke.decode(token, "secret", algorithms=["HS256"])
+    res = webtoken.decode(token, "secret", algorithms=["HS256"])
     print(f'{token=}\n\n{res=}')
 
 
@@ -274,8 +273,8 @@ def test_custom_algo():
         def verify(self, msg: bytes, sig: bytes, key: bytes) -> bool:
             return sig == b"my_signature_bytes"
 
-    toke.register_algorithm("WEIRD-256", MyWeirdAlgo())
-    token = toke.encode({"sub": "123"}, "secret", algorithm="WEIRD-256")
+    webtoken.register_algorithm("WEIRD-256", MyWeirdAlgo())
+    token = webtoken.encode({"sub": "123"}, "secret", algorithm="WEIRD-256")
     print(f'{token=}')
      
 
@@ -287,23 +286,23 @@ def test_public_key_encode_crash_prevention():
     print("\n--- Test: Public Key Encode Crash Prevention ---")
     
     payload = {"sub": "safety_check", "exp": int(time.time()) + 3600}
-    priv_rsa, pub_rsa = toke.generate_key_pair("RS256")
-    priv_ec, pub_ec = toke.generate_key_pair("ES256")
+    priv_rsa, pub_rsa = webtoken.generate_key_pair("RS256")
+    priv_ec, pub_ec = webtoken.generate_key_pair("ES256")
 
     # 1. Test with RSA Public Key
     # try:
-    #     toke.encode(payload, pub_rsa, algorithm="RS256")
+    #     webtoken.encode(payload, pub_rsa, algorithm="RS256")
     #     print("FAILED (Did not raise InvalidKeyError for RSA)")
     #     sys.exit(1)
-    # except toke.InvalidKeyError as e:
+    # except webtoken.InvalidKeyError as e:
     #     assert "Public Key" in str(e)
 
     # # 2. Test with EC Public Key
     # try:
-    #     toke.encode(payload, pub_ec, algorithm="ES256")
+    #     webtoken.encode(payload, pub_ec, algorithm="ES256")
     #     print("FAILED (Did not raise InvalidKeyError for EC)")
     #     sys.exit(1)
-    # except toke.InvalidKeyError as e:
+    # except webtoken.InvalidKeyError as e:
     #     assert "Public Key" in str(e)
     
     print("✅ PASSED Public Key Encode Crash")
@@ -316,13 +315,13 @@ def test_hmac_pem_confusion():
     print("\n--- Test: HMAC PEM Confusion ---")
     
     payload = {"sub": "safety_check"}
-    priv_rsa, _ = toke.generate_key_pair("RS256")
+    priv_rsa, _ = webtoken.generate_key_pair("RS256")
 
     try:
-        toke.encode(payload, priv_rsa, algorithm="HS256")
+        webtoken.encode(payload, priv_rsa, algorithm="HS256")
         print("❌ FAILED (Did not raise InvalidKeyError)")
         sys.exit(1)
-    except toke.InvalidKeyError as e:
+    except webtoken.InvalidKeyError as e:
         assert "asymmetric key" in str(e)
         assert "HMAC secret" in str(e)
 
@@ -336,18 +335,18 @@ def test_none_algorithm_enforcement():
     print("\n--- Test: None Algorithm Enforcement ---")
     
     payload = {"sub": "safety_check"}
-    none_token = toke.encode(payload, "secret", algorithm="none")
+    none_token = webtoken.encode(payload, "secret", algorithm="none")
 
     # 1. Default Decode (Should Fail)
     try:
-        toke.decode(none_token, "secret", verify=False)
+        webtoken.decode(none_token, "secret", verify=False)
         print("❌ FAILED (Accepted 'none' algo without permission)")
         sys.exit(1)
-    except toke.InvalidTokenError:
+    except webtoken.InvalidTokenError:
         pass # Expected
 
     # 2. Decode with explicit allow (Should Pass)
-    decoded = toke.decode(none_token, "secret", verify=False, algorithms=["none"])
+    decoded = webtoken.decode(none_token, "secret", verify=False, algorithms=["none"])
     assert decoded["sub"] == "safety_check"
 
     print("✅ PASSED None Algorithm Enforcement")
@@ -360,10 +359,10 @@ def test_invalid_algorithm_string():
     print("\n--- Test: Invalid Algorithm String ---")
     
     payload = {"sub": "safety_check"}
-    priv_rsa, _ = toke.generate_key_pair("RS256")
+    priv_rsa, _ = webtoken.generate_key_pair("RS256")
 
     try:
-        toke.encode(payload, priv_rsa, algorithm="NOT-A-REAL-ALGO")
+        webtoken.encode(payload, priv_rsa, algorithm="NOT-A-REAL-ALGO")
         print("❌ FAILED (Did not raise ValueError)")
         sys.exit(1)
     except ValueError as e:
@@ -383,7 +382,7 @@ def test_key_type_safety():
 
     # 1. Encode with int key (Should fail immediately)
     try:
-        toke.encode(payload, 12345, algorithm="HS256")
+        webtoken.encode(payload, 12345, algorithm="HS256")
         print("❌ FAILED (Accepted int key for encode)")
         sys.exit(1)
     except TypeError:
@@ -392,10 +391,10 @@ def test_key_type_safety():
     # 2. Decode with dict key
     # FIX: Create a VALID token first so the parser doesn't crash on the header.
     # We want it to parse the header, verify 'HS256', and THEN fail on the dict key.
-    real_token = toke.encode(payload, "temporary_secret", algorithm="HS256")
+    real_token = webtoken.encode(payload, "temporary_secret", algorithm="HS256")
     
     try:
-        toke.decode(real_token, {"i": "am a dict"}, algorithms=["HS256"])
+        webtoken.decode(real_token, {"i": "am a dict"}, algorithms=["HS256"])
         print("❌ FAILED (Accepted dict key for decode)")
         sys.exit(1)
     except TypeError:
@@ -407,19 +406,19 @@ def test_key_type_safety():
 def test_cryto_utils():
 
     print("\n--- Test: Crypto Utils ")
-    key = toke.random_bytes(32)
+    key = webtoken.random_bytes(32)
     data = b"Sensitive Database Record"
     aad = b"record_id:12345" # Bind encryption to context!
 
-    ciphertext = toke.encrypt_aes_256_gcm(key, data, aad)
+    ciphertext = webtoken.encrypt_aes_256_gcm(key, data, aad)
     print(f"Encrypted ({len(ciphertext)} bytes): {ciphertext.hex()[:20]}...")
 
-    decrypted = toke.decrypt_aes_256_gcm(key, ciphertext, aad)
+    decrypted = webtoken.decrypt_aes_256_gcm(key, ciphertext, aad)
     print((f"✅" if decrypted == data else "❌") + " aes_256_gcm encrypt -> decrypt")
 
     #  Key Derivation
     master_secret = b"shared-secret-from-dh"
-    derived_key = toke.hkdf_sha256(
+    derived_key = webtoken.hkdf_sha256(
         secret=master_secret, 
         salt=b"random-salt", 
         info=b"application-specific-context",
@@ -435,12 +434,12 @@ async def test_asyncio():
 
     # 1. Encode Async
     start = time.time()
-    token = await toke.encode_async(PAYLOAD, SECRET, algorithm="HS256")
+    token = await webtoken.encode_async(PAYLOAD, SECRET, algorithm="HS256")
     print(f"✅ Encoded (Async): {token[:20]}... in {time.time() - start:.5f}s")
 
     # 2. Decode Async
     start = time.time()
-    decoded = await toke.decode_async(token, SECRET, algorithms=["HS256"])
+    decoded = await webtoken.decode_async(token, SECRET, algorithms=["HS256"])
     print(f"✅ Decoded (Async): {decoded} in {time.time() - start:.5f}s")
 
     # 3. Concurrency Test (Proof it doesn't block)
@@ -448,8 +447,8 @@ async def test_asyncio():
     
     async def worker(i):
         # Heavy operation: RSA would be better here to show CPU offloading
-        t = await toke.encode_async({"idx": i}, SECRET)
-        await toke.decode_async(t, SECRET, algorithms=["HS256"])
+        t = await webtoken.encode_async({"idx": i}, SECRET)
+        await webtoken.decode_async(t, SECRET, algorithms=["HS256"])
         return i
 
     start = time.time()
