@@ -1,6 +1,6 @@
 ![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-darkgreen?style=flat&logo=python&logoColor=blue)
 
-# Toke
+# Webtoken
 
 **Rust-backed JWT**
 
@@ -42,13 +42,13 @@ Developed on Linux / Python 3.13, currently can't attest to other platforms.
 1. PyJWT Style (Drop-in Replacement)
 
 ```python
-import toke
+import webtoken as wt
 
 key = "secret"
 payload = {"sub": "1234567890", "name": "John Doe", "iat": 1516239022}
-token = toke.encode(payload, key, algorithm="HS256")
+token = wt.encode(payload, key, algorithm="HS256")
 
-decoded = toke.decode(token, key, algorithms=["HS256"])
+decoded = wt.decode(token, key, algorithms=["HS256"])
 print(decoded)
 ```
 
@@ -57,15 +57,15 @@ print(decoded)
 3. Asyncio variants
 
 ```python
-import toke
+import webtoken as wt
 
 # The rust based encode/decode release the GIL
 # You can send them away on asyncio.to_thread(), or use the provided wrappers
 
 payload = {"name": "Bob"}
-token = await toke.encode_async(payload, "secret", algorithm="HS256")
+token = await wt.encode_async(payload, "secret", algorithm="HS256")
 
-decoded = await toke.decode_async(token, "secret", algorithms=["HS256"])
+decoded = await wt.decode_async(token, "secret", algorithms=["HS256"])
 print(decoded)
 # {'name': 'Bob'}
 ```
