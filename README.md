@@ -46,9 +46,9 @@ import webtoken as jwt
 
 key = "secret"
 payload = {"sub": "1234567890", "name": "John Doe", "iat": 1516239022}
-token = wt.encode(payload, key, algorithm="HS256")
+token = jwt.encode(payload, key, algorithm="HS256")
 
-decoded = wt.decode(token, key, algorithms=["HS256"])
+decoded = jwt.decode(token, key, algorithms=["HS256"])
 print(decoded)
 ```
 
