@@ -42,7 +42,7 @@ Developed on Linux / Python 3.13, currently can't attest to other platforms.
 1. PyJWT Style (Drop-in Replacement)
 
 ```python
-import webtoken as wt
+import webtoken as jwt
 
 key = "secret"
 payload = {"sub": "1234567890", "name": "John Doe", "iat": 1516239022}
