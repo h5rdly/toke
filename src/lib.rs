@@ -5,10 +5,10 @@ use std::sync::{OnceLock, RwLock};
 use jsonwebtoken::{Algorithm, DecodingKey, Header, Validation, 
 };
 
-use serde_json::{Value, Map, from_str};
+use serde_json::{from_str, from_slice, to_vec, Value, Map, map::Entry};
 use serde::{Serialize, Deserialize};
 use base64::{Engine as _, engine::general_purpose::{URL_SAFE_NO_PAD, STANDARD}};
-use time::OffsetDateTime;
+use time::{OffsetDateTime, PrimitiveDateTime};
 
 use pyo3::prelude::*;
 use pyo3::exceptions::{PyTypeError, PyValueError, PyNotImplementedError};
@@ -26,7 +26,6 @@ pub mod pyjwt_jwk_api;
 use crate::algorithms::{ExternalAlgorithm, perform_signature, perform_verification};
 use crate::pyjwt_jwk_api::{PyJWK, PyJWKSet, perform_signature_jwk, perform_verification_jwk};
 use crate::py_utils::decode_base64_permissive;
-use crate::jws::{sign_output, verify_bytes};
 
 
 #[macro_export]
@@ -151,14 +150,12 @@ fn get_registry() -> &'static RwLock<HashMap<String, Py<PyAny>>> {
 #[pyfunction]
 #[pyo3(signature = (message, key, algorithm))]
 fn raw_sign(message: &[u8], key: &Bound<'_, PyAny>, algorithm: &str) -> PyResult<Vec<u8>> {
-    let key_bytes = get_key_bytes(key, algorithm, true)?;
+    let key_bytes = get_key_bytes(key, algorithm, true, false)?;
     
     if let Ok(jwk) = key.extract::<PyJWK>() { 
         return perform_signature_jwk(message, &jwk, algorithm).map_err(Into::into); 
     }
 
-    // [FIX] Always use perform_signature. It handles routing for all algorithms.
-    // The previous code had `if algorithm.starts_with("HS") ...` which prevented ES512 from reaching here.
     perform_signature(message, &key_bytes, algorithm)
         .map_err(|e| PyValueError::new_err(format!("{}", e)))
 }
@@ -167,7 +164,7 @@ fn raw_sign(message: &[u8], key: &Bound<'_, PyAny>, algorithm: &str) -> PyResult
 #[pyfunction]
 #[pyo3(signature = (message, signature, key, algorithm))]
 fn raw_verify(message: &[u8], signature: &[u8], key: &Bound<'_, PyAny>, algorithm: &str) -> PyResult<bool> {
-    let key_bytes = get_key_bytes(key, algorithm, false)?;
+    let key_bytes = get_key_bytes(key, algorithm, false, false)?;
     
     if let Ok(jwk) = key.extract::<PyJWK>() { 
         return perform_verification_jwk(message, signature, &jwk, algorithm).map_err(Into::into); 
@@ -180,32 +177,25 @@ fn raw_verify(message: &[u8], signature: &[u8], key: &Bound<'_, PyAny>, algorith
 
 
 #[pyfunction]
-#[pyo3(signature = (payload, key, algorithm="HS256", headers=None, sort_headers=true))]
+#[pyo3(signature = (payload, key, algorithm="HS256", headers=None, sort_headers=true, check_length=false))] // [FIX] Added arg
 fn sign(
     payload: &Bound<'_, PyAny>, 
     key: &Bound<'_, PyAny>, 
     algorithm: &str, 
     headers: Option<&Bound<'_, PyDict>>,
     sort_headers: bool,
+    check_length: bool, 
 ) -> PyResult<String> {
     
-    let mut header_map = prepare_headers(algorithm, headers)?;
-    if sort_headers {
-        sort_map(&mut header_map);
-    }
+    let header_map = prepare_headers(algorithm, headers, sort_headers)?;
+    let payload_slice = payload.extract::<&[u8]>().map_err(|_| PyTypeError::new_err("Payload must be string or bytes"))?;
 
-    let payload_bytes = if let Ok(s) = payload.extract::<String>() { s.into_bytes() } 
-    else if let Ok(b) = payload.extract::<Vec<u8>>() { b } 
-    else { return Err(PyTypeError::new_err("Payload must be string or bytes")); };
+    let (header_b64, payload_b64, signing_input) = jws::prepare_jws_parts(&header_map, &payload_slice).map_err(Into::<PyErr>::into)?;
+    let detached = header_map.get("b64") == Some(&Value::Bool(false));
+    let key_bytes = get_key_bytes(key, algorithm, true, check_length)?;
 
-    let detached = match header_map.get("b64") {
-        Some(Value::Bool(b)) => !b,
-        _ => false
-    };
-
-    let key_bytes = get_key_bytes(key, algorithm, true)?;
-
-    sign_output(&payload_bytes, &key_bytes, algorithm, header_map, detached).map_err(Into::into)
+    jws::sign_output(&signing_input, &header_b64, &payload_b64, &key_bytes, algorithm, detached)
+        .map_err(Into::into)
 }
 
 
@@ -214,9 +204,9 @@ fn sign(
 fn verify(py: Python, token: &Bound<'_, PyAny>, key: &Bound<'_, PyAny>, algorithm: &str) -> PyResult<(Py<PyAny>, Py<PyBytes>)> {
     let token_str = extract_token_str(token)?;
     let alg_norm = algorithm.to_uppercase();
-    let key_bytes = get_key_bytes(key, &alg_norm, false)?;
+    let key_bytes = get_key_bytes(key, &alg_norm, false, false)?;
     
-    let (header, payload) = verify_bytes(&token_str, &key_bytes, &alg_norm).map_err(Into::<PyErr>::into)?;
+    let (header, payload) = jws::verify_bytes(&token_str, &key_bytes, &alg_norm).map_err(Into::<PyErr>::into)?;
     let py_header = pythonize::pythonize(py, &header).map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok((py_header.unbind(), PyBytes::new(py, &payload).unbind()))
 }
@@ -342,7 +332,7 @@ fn peek_algorithm(token: &str) -> PyResult<String> {
     let bytes = base64url_decode_inner(part)
         .map_err(|_| PyValueError::new_err("Invalid Header Encoding"))?;
         
-    let header: PartialHeader = serde_json::from_slice(&bytes)
+    let header: PartialHeader = from_slice(&bytes)
         .map_err(|_| PyValueError::new_err("Invalid Header JSON"))?;
         
     Ok(header.alg)
@@ -357,7 +347,7 @@ fn extract_token_str(token: &Bound<'_, PyAny>) -> PyResult<String> {
 }
 
 
-fn get_key_bytes(key: &Bound<'_, PyAny>, alg_name: &str, is_signing: bool) -> PyResult<Vec<u8>> {
+fn get_key_bytes(key: &Bound<'_, PyAny>, alg_name: &str, is_signing: bool, check_length: bool) -> PyResult<Vec<u8>> {
 
     if let Ok(jwk) = key.extract::<PyJWK>() { return jwk.to_key_bytes(!is_signing); }
     
@@ -376,7 +366,27 @@ fn get_key_bytes(key: &Bound<'_, PyAny>, alg_name: &str, is_signing: bool) -> Py
     if ExternalAlgorithm::from_str(alg_name).is_some() { return Ok(key_bytes); }
     let alg = Algorithm::from_str(alg_name).map_err(|_| PyNotImplementedError::new_err(format!("Algorithm '{}' not supported", alg_name)))?;
     
-    if is_hmac(alg) && looks_like_public_key(&key_bytes) { return Err(InvalidKeyError::new_err("The specified key is an asymmetric key... should not be used as an HMAC secret.")); }
+    if is_hmac(alg) {
+        if looks_like_public_key(&key_bytes) { 
+            return Err(InvalidKeyError::new_err("The specified key is an asymmetric key... should not be used as an HMAC secret.")); 
+        }
+        
+        // [NEW] Validation Logic
+        if check_length {
+            let min_len = match alg {
+                Algorithm::HS256 => 32,
+                Algorithm::HS384 => 48,
+                Algorithm::HS512 => 64,
+                _ => 0,
+            };
+            if key_bytes.len() < min_len {
+                return Err(InvalidKeyError::new_err(format!(
+                    "The specified key is {} bytes long, which is below the minimum recommended length of {} bytes.",
+                    key_bytes.len(), min_len
+                )));
+            }
+        }
+    }
     Ok(key_bytes)
 }
 
@@ -393,7 +403,7 @@ fn get_decoding_key(key: &Bound<'_, PyAny>, alg_str: &str, check_length: bool) -
     }
 
     // 3. Handle Raw Bytes/PEM
-    let key_bytes = get_key_bytes(key, alg_str, false)?;
+    let key_bytes = get_key_bytes(key, alg_str, false, false)?;
     
     if check_length && is_hmac(alg) {
         let min_len = match alg {
@@ -478,58 +488,47 @@ fn get_numeric_date(v: &Value) -> Option<f64> {
 }
 
 
-fn prepare_headers(
-    algorithm: &str,
-    headers: Option<&Bound<'_, PyDict>>
-) -> PyResult<Map<String, Value>> {
+fn prepare_headers(algorithm: &str, headers: Option<&Bound<'_, PyDict>>, sort_headers: bool) -> PyResult<Map<String, Value>> {
+
     let mut header_map = match headers {
         Some(h) => depythonize(h).map_err(|e| PyTypeError::new_err(format!("Invalid header: {}", e)))?,
         None => Map::new() 
     };
 
-    // Standard RFC7515 checks
     if !header_map.contains_key("alg") {
         header_map.insert("alg".to_string(), Value::String(algorithm.to_string()));
     }
-    if !header_map.contains_key("typ") {
-        header_map.insert("typ".to_string(), Value::String("JWT".to_string()));
-    }
-    
-    if let Some(val) = header_map.get("typ") {
-        let should_remove = match val {
-            Value::Null => true,
-            Value::String(s) if s.is_empty() => true,
-            _ => false
-        };
-        
-        if should_remove {
-            header_map.remove("typ");
-        }
-    } else {
-        // Only insert default if it wasn't present at all
-        header_map.insert("typ".to_string(), Value::String("JWT".to_string()));
+
+    if header_map.get("kid").is_some_and(|kid| !kid.is_string()) {
+        return Err(InvalidTokenError::new_err("Key ID header parameter must be a string"));
     }
 
-    // Validate 'kid' is a string if present
-    if let Some(kid) = header_map.get("kid") {
-        if !kid.is_string() {
-            return Err(InvalidTokenError::new_err("Key ID header parameter must be a string"));
-        }
-    }
-
-    // RFC 7797: If b64 is True (default), it can be omitted.
     if let Some(Value::Bool(true)) = header_map.get("b64") {
-        header_map.remove("b64");
+        header_map.remove("b64");   // RFC 7797: If b64 is True (default), it can be omitted
+    }
+
+    match header_map.entry("typ") {
+        Entry::Occupied(entry) => {
+            let val = entry.get();
+            if val.is_null() || val.as_str().is_some_and(|s| s.is_empty()) {
+                entry.remove_entry();
+            }
+        }
+        Entry::Vacant(entry) => {
+            entry.insert(Value::String("JWT".to_string()));
+        }
+    }
+
+    if sort_headers {
+        sort_map(&mut header_map);
     }
 
     Ok(header_map)
 }
 
 
-fn prepare_validation(
-    algorithms: Option<Vec<String>>,
-    options: Option<&Bound<'_, PyDict>>,
-) -> PyResult<(Validation, bool, bool, bool, bool, bool, bool, bool)> { 
+fn prepare_validation(algorithms: Option<Vec<String>>, options: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<(Validation, bool, bool, bool, bool, bool, bool, bool)> { 
 
     let alg_strs = algorithms.unwrap_or_else(|| vec!["HS256".to_string()]);
     let mut standard_algs = Vec::new();
@@ -748,7 +747,7 @@ fn decode_impl(
     let header_bytes = decode_base64_permissive(parts[0].as_bytes())
         .map_err(|_| WebtokenError::Custom { exc: "DecodeError".into(), msg: "Invalid header padding".into() })?;
 
-    let mut header_val: Value = serde_json::from_slice(&header_bytes)
+    let mut header_val: Value = from_slice(&header_bytes)
         .map_err(|e| WebtokenError::Custom { exc: "DecodeError".into(), msg: format!("Invalid header string: {}", e) })?;
 
     if !header_val.is_object() {
@@ -821,7 +820,7 @@ fn decode_impl(
         return Ok(TokenPayload::Raw(payload_bytes));
     }
 
-    if let Ok(claims) = serde_json::from_slice::<Value>(&payload_bytes) {
+    if let Ok(claims) = from_slice::<Value>(&payload_bytes) {
         validate_claims_content(&claims, &validation, check_exp, check_nbf, check_aud, check_iss, check_sub, strict_aud, &expected_aud, &expected_iss, &expected_sub)?;
         
         if check_iat {
@@ -867,7 +866,7 @@ fn decode_complete_impl(
     let header_bytes = decode_base64_permissive(parts[0].as_bytes())
         .map_err(|_| WebtokenError::Custom { exc: "DecodeError".into(), msg: "Invalid header padding".into() })?;
     
-    let mut header_val: Value = serde_json::from_slice(&header_bytes)
+    let mut header_val: Value = from_slice(&header_bytes)
         .map_err(|e| WebtokenError::Custom { exc: "DecodeError".into(), msg: format!("Invalid header string: {}", e) })?;
     
     if let Some(val) = header_val.get("b64") {
@@ -934,11 +933,11 @@ fn decode_complete<'py>(py: Python<'py>, token: &Bound<'py, PyAny>, key: Option<
         if parts.len() < 2 { return Err(DecodeError::new_err("Invalid Token Format")); }
 
         let header_json = URL_SAFE_NO_PAD.decode(parts[0]).map_err(|e| DecodeError::new_err(format!("Invalid header padding: {}", e)))?;
-        let header_val: Value = serde_json::from_slice(&header_json).map_err(|e| DecodeError::new_err(format!("Invalid header: {}", e)))?;
+        let header_val: Value = from_slice(&header_json).map_err(|e| DecodeError::new_err(format!("Invalid header: {}", e)))?;
         
         let payload_bytes = decode_base64_permissive(parts[1].as_bytes()).map_err(|e| DecodeError::new_err(format!("Invalid payload padding: {}", e)))?;
         
-        let payload = if let Ok(json) = serde_json::from_slice(&payload_bytes) { 
+        let payload = if let Ok(json) = from_slice(&payload_bytes) { 
             TokenPayload::Claims(json) 
         } else { 
             TokenPayload::Raw(payload_bytes) 
@@ -970,61 +969,61 @@ fn decode_complete<'py>(py: Python<'py>, token: &Bound<'py, PyAny>, key: Option<
 
 
 #[pyfunction]
-#[pyo3(signature = (payload, key, algorithm="HS256", headers=None, sort_headers=true))]
+#[pyo3(signature = (payload, key, algorithm="HS256", headers=None, sort_headers=true, check_length=false))] // [FIX] Added arg
 fn encode_fast(
     payload: &Bound<'_, PyDict>, 
     key: &Bound<'_, PyAny>, 
     algorithm: &str, 
     headers: Option<&Bound<'_, PyDict>>,
     sort_headers: bool,
+    check_length: bool, 
 ) -> PyResult<String> {
     
-    // ... (Headers processing) ...
-    let mut header_map = prepare_headers(algorithm, headers)?;
-    if sort_headers {
-        sort_map(&mut header_map);
-    }
-    let detached = match header_map.get("b64") { Some(Value::Bool(b)) => !b, _ => false };
-
-    // ... (Claims processing) ...
-    let mut claims_map = Map::new();
     let time_claims = ["exp", "iat", "nbf"];
+    let mut claims_map = Map::new();
+
     for (k_py, v_py) in payload {
-        let key_str = k_py.extract::<String>()?;
-        if key_str == "iss" && !v_py.is_instance_of::<PyString>() { return Err(PyTypeError::new_err("Issuer (iss) must be a string.")); }
-        let value_json = if time_claims.contains(&key_str.as_str()) {
-            if let Ok(dt) = v_py.extract::<OffsetDateTime>() { 
-                serde_json::Value::Number(dt.unix_timestamp().into()) 
-            }else if let Ok(dt_naive) = v_py.extract::<time::PrimitiveDateTime>() {
-                // Fallback: Assume UTC if naive (PrimitiveDateTime -> OffsetDateTime)
-                serde_json::Value::Number(dt_naive.assume_utc().unix_timestamp().into())
-            } else { depythonize(&v_py).map_err(|e| PyValueError::new_err(format!("Serialization failed: {}", e)))? }
-        } else { depythonize(&v_py).map_err(|e| PyValueError::new_err(format!("Serialization failed: {}", e)))? };
-        claims_map.insert(key_str, value_json);
+
+        let key_str = k_py.extract::<&str>()?; 
+        if key_str == "iss" && !v_py.is_instance_of::<PyString>() { 
+            return Err(PyTypeError::new_err("Issuer (iss) must be a string.")); 
+        }
+
+        let timestamp = time_claims.contains(&key_str).then(|| {
+            v_py.extract::<OffsetDateTime>().map(|dt| dt.unix_timestamp()).or_else(
+                |_| v_py.extract::<PrimitiveDateTime>().map(|dt| dt.assume_utc().unix_timestamp())
+            ).ok()
+        }).flatten();
+
+        let value_json = match timestamp {
+            Some(ts) => Value::Number(ts.into()),
+            None => depythonize(&v_py).map_err(|e| PyValueError::new_err(
+                format!("Serialization failed: {e}")))?,
+        };
+
+        claims_map.insert(key_str.to_string(), value_json);
     }
 
-    let payload_bytes = serde_json::to_vec(&claims_map).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    
-    // [FIX] Prepare Signing Input (Header.Payload)
-    let header_json = serde_json::to_vec(&header_map).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    let header_b64 = URL_SAFE_NO_PAD.encode(header_json);
-    let payload_b64 = URL_SAFE_NO_PAD.encode(&payload_bytes);
-    let signing_input = format!("{}.{}", header_b64, payload_b64);
+    let header_map = prepare_headers(algorithm, headers, sort_headers)?;
+    let payload_bytes = to_vec(&claims_map).map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+    let (header_b64, payload_b64, signing_input) = jws::prepare_jws_parts(&header_map, &payload_bytes)
+        .map_err(Into::<PyErr>::into)?;
 
     if let Ok(jwk) = key.extract::<PyJWK>() {
-        // [FIX] Sign the Signing Input, not just the payload
         let sig_bytes = perform_signature_jwk(signing_input.as_bytes(), &jwk, algorithm).map_err(Into::<PyErr>::into)?;
         let sig_b64 = URL_SAFE_NO_PAD.encode(sig_bytes);
-        
         return Ok(format!("{}.{}", signing_input, sig_b64));
     }
 
-    let key_bytes = get_key_bytes(key, algorithm, true)?;
-    crate::jws::sign_output(&payload_bytes, &key_bytes, algorithm, header_map, detached).map_err(Into::into)
+    let key_bytes = get_key_bytes(key, algorithm, true, check_length)?;
+    let detached = header_map.get("b64") == Some(&Value::Bool(false));
+
+    jws::sign_output(&signing_input, &header_b64, &payload_b64, &key_bytes, algorithm, detached)
+        .map_err(Into::into)
 }
 
 
-// [FIX] Renamed to avoid macro collision
 #[pyfunction(name = "decode")]
 #[pyo3(signature = (token, key=None, algorithms=None, options=None, audience=None, issuer=None, subject=None, verify=true, content=None, return_dict=true))]
 fn py_decode<'py>(
@@ -1070,7 +1069,7 @@ fn get_unverified_header<'py>(py: Python<'py>, token: &Bound<'py, PyAny>) -> PyR
     
     let bytes = base64url_decode_inner(part).map_err(|_| DecodeError::new_err("Invalid header padding"))?;
     
-    let val: Value = serde_json::from_slice(&bytes).map_err(|e| DecodeError::new_err(format!("Invalid header string: {}", e)))?;
+    let val: Value = from_slice(&bytes).map_err(|e| DecodeError::new_err(format!("Invalid header string: {}", e)))?;
 
     // PyJWT wants 'kid' to be a string if present, even for unverified headers
     if let Some(kid) = val.get("kid") {
@@ -1087,7 +1086,7 @@ fn unsafe_peek<'py>(py: Python<'py>, token: &str) -> PyResult<Bound<'py, PyAny>>
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() < 2 { return Err(PyValueError::new_err("Invalid Token Format")); }
     let payload_bytes = base64url_decode_inner(parts[1]).map_err(|_| PyValueError::new_err("Invalid Payload Base64"))?;
-    let claims: Value = serde_json::from_slice(&payload_bytes).map_err(|_| PyValueError::new_err("Invalid Payload JSON"))?;
+    let claims: Value = from_slice(&payload_bytes).map_err(|_| PyValueError::new_err("Invalid Payload JSON"))?;
     Ok(pythonize(py, &claims).unwrap())
 }
 

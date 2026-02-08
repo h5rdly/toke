@@ -5,39 +5,38 @@ use crate::{WebtokenError, algorithms::{perform_signature, perform_verification}
 use crate::py_utils::decode_base64_permissive;
 
 
+pub fn prepare_jws_parts(header_map: &Map<String, Value>, payload_bytes: &[u8]
+) -> Result<(String, String, String), WebtokenError> {
+    
+    let header_json = serde_json::to_vec(header_map)
+        .map_err(|e| WebtokenError::Generic(e.to_string()))?;
+        
+    let header_b64 = URL_SAFE_NO_PAD.encode(&header_json);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(payload_bytes);
+    
+    let signing_input = format!("{}.{}", header_b64, payload_b64);
+    
+    Ok((header_b64, payload_b64, signing_input))
+}
+
+
 pub fn sign_output(
-    payload: &[u8], 
-    key: &[u8], 
-    alg_name: &str, 
-    headers: Map<String, Value>, 
+    signing_input: &str,
+    header_b64: &str,
+    payload_b64: &str,
+    key: &[u8],
+    alg_name: &str,
     detached: bool
 ) -> Result<String, WebtokenError> {
     
-    // 1. Serialize and Encode Headers
-    let header_json = serde_json::to_vec(&headers).map_err(|e| WebtokenError::Generic(e.to_string()))?;
-    let header_b64 = URL_SAFE_NO_PAD.encode(header_json);
-    
-    // 2. Encode Payload
-    let payload_b64 = URL_SAFE_NO_PAD.encode(payload);
-    
-    // 3. Handle "None" (Unsecured)
-    // RFC 7515: Unsecured JWS use empty signature.
     if alg_name.eq_ignore_ascii_case("none") {
-        if detached {
-            return Ok(format!("{}..", header_b64));
-        }
+        if detached { return Ok(format!("{}..", header_b64)); }
         return Ok(format!("{}.{}.", header_b64, payload_b64));
     }
 
-    // 4. Construct Signing Input
-    // The input to the signature is ALWAYS "header.payload", even if detached.
-    let signing_input = format!("{}.{}", header_b64, payload_b64);
-    
-    // 5. Calculate Signature (Raw Crypto)
     let sig_bytes = perform_signature(signing_input.as_bytes(), key, alg_name)?;
     let sig_b64 = URL_SAFE_NO_PAD.encode(sig_bytes);
 
-    // 6. Format Output
     if detached {
         Ok(format!("{}..{}", header_b64, sig_b64))
     } else {

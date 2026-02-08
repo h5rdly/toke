@@ -187,7 +187,8 @@ def encode(
     algorithm: str = "HS256", 
     headers: Optional[Dict[str, Any]] = None, 
     json_encoder: Optional[Any] = None, 
-    sort_headers: bool = True
+    sort_headers: bool = True,
+    check_length: bool = False
 ) -> str:
     
     if not isinstance(payload, (dict, bytes)):
@@ -203,16 +204,19 @@ def encode(
             # Match PyJWT behavior: raise TypeError on header serialization failure
             raise TypeError(f"Header serialization failed: {e}")
 
+
     # standard path, no custom encoder
     if isinstance(payload, dict) and json_encoder is None:
         try:
-            return _rust_encode(payload, key, algorithm, headers_to_pass, sort_headers)
-        except TypeError:
-            pass # Fallback to slow path for complex types
+            res =  _rust_encode(payload, key, algorithm, headers_to_pass, sort_headers, check_length)
+            return res
+        # except TypeError:
+            # pass # Fallback to slow path for complex types
         except Exception as e:
             raise e
 
-    # Custom rncoders or raw bytes (PyJWS)
+    # Custom encoders or raw bytes (PyJWS)
+    print(f'## starting slow lane')
     json_payload = payload
     if isinstance(payload, dict):
         payload_copy = payload.copy()
@@ -227,7 +231,7 @@ def encode(
         json_payload = json.dumps(payload_copy, separators=(",", ":"), cls=json_encoder).encode("utf-8")
     
     # Headers & Signing (Delegated to Rust)
-    return _rust_sign(json_payload, key, algorithm, headers_to_pass, sort_headers)
+    return _rust_sign(json_payload, key, algorithm, headers_to_pass, sort_headers, check_length)
 
 
 def decode(
@@ -286,6 +290,35 @@ def decode_complete(
     decoded_struct["payload"] = payload
 
     return decoded_struct
+
+
+# --- Async Wrappers 
+
+async def encode_async(
+    payload: Dict[str, Any], 
+    key: Union[str, bytes], 
+    algorithm: str = "HS256", 
+    headers: Optional[Dict[str, Any]] = None
+) -> str:
+    return await asyncio.to_thread(encode, payload, key, algorithm, headers)
+
+
+async def decode_async(
+    token: str,
+    key: Union[str, bytes],
+    algorithms: Optional[List[str]] = None,
+    options: Optional[Dict[str, Any]] = None,
+    audience: Optional[Union[str, List[str]]] = None,
+    issuer: Optional[str] = None,
+    subject: Optional[str] = None,
+    verify: bool = True,
+    content: Optional[bytes] = None,
+) -> Dict[str, Any]:
+
+    return await asyncio.to_thread(
+        decode, token, key, algorithms, options, audience, issuer, subject, verify, content
+    )
+
 
 
 # -- Curves shim  
@@ -862,9 +895,11 @@ class PyJWS:
         if algorithm not in self._algorithms: 
             raise NotImplementedError("Algorithm not supported")
         
-        _validate_key_length(key, algorithm, self.options.get("enforce_minimum_key_length"))
+        check_len = self.options.get("enforce_minimum_key_length", False)
 
-        return encode(payload, key, algorithm, headers, json_encoder, sort_headers)
+        # _validate_key_length(key, algorithm, self.options.get("enforce_minimum_key_length"))
+
+        return encode(payload, key, algorithm, headers, json_encoder, sort_headers, check_length=check_len)
     
 
     def decode(
@@ -917,18 +952,19 @@ class PyJWT:
         self.options = {"verify_signature": True, "verify_exp": True, "verify_nbf": True, "verify_iat": True, "verify_aud": True, "verify_iss": True, "verify_sub": True, "verify_jti": True, "require": []}
         if options: self.options.update(options)
     
+
     def encode(self, payload, key, algorithm="HS256", headers=None, json_encoder=None, sort_headers=True):
         
-        if algorithm.startswith("HS"):
-            key_bytes = key.encode("utf-8") if isinstance(key, str) else key
-            if isinstance(key_bytes, bytes):
-                min_len = {"HS256": 32, "HS384": 48, "HS512": 64}.get(algorithm, 0)
-                if len(key_bytes) < min_len:
-                    msg = f"The specified key is {len(key_bytes)} bytes long, which is below the minimum recommended length of {min_len} bytes."
-                    if self.options.get("enforce_minimum_key_length"):
-                        raise rust_lib.InvalidKeyError(msg)
-                    else:
-                        warnings.warn(msg, InsecureKeyLengthWarning)
+        # if algorithm.startswith("HS"):
+        #     key_bytes = key.encode("utf-8") if isinstance(key, str) else key
+        #     if isinstance(key_bytes, bytes):
+        #         min_len = {"HS256": 32, "HS384": 48, "HS512": 64}.get(algorithm, 0)
+        #         if len(key_bytes) < min_len:
+        #             msg = f"The specified key is {len(key_bytes)} bytes long, which is below the minimum recommended length of {min_len} bytes."
+        #             if self.options.get("enforce_minimum_key_length"):
+        #                 raise rust_lib.InvalidKeyError(msg)
+        #             else:
+        #                 warnings.warn(msg, InsecureKeyLengthWarning)
 
         return encode(payload, key, algorithm, headers, json_encoder, sort_headers)
     
@@ -970,6 +1006,8 @@ class PyJWT:
 rust_lib.encode = encode
 rust_lib.decode = decode
 rust_lib.decode_complete = decode_complete
+rust_lib.encode_async = encode_async
+rust_lib.decode_async = decode_async
 
 rust_lib._validate_iss = _validate_iss
 rust_lib.json_loads = _rust_json_loads

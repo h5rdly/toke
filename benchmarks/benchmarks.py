@@ -1,9 +1,9 @@
 import asyncio, sys, time
 
-import jwt
-
 sys.path.append(__file__.rsplit("/", 2)[0])
 import webtoken
+
+import jwt
 
 
 def benchmark(iterations=100):
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         )
 
     for benchmark in benchmarks:
-        benchmark()
+        benchmark(1000)
         pass
 
     # asyncio.run(async_benchmark())
