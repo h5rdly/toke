@@ -1,6 +1,6 @@
 ![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-darkgreen?style=flat&logo=python&logoColor=blue)
 
-# Webtoken
+# webtoken
 
 **Rust-backed JWT**
 
@@ -10,16 +10,16 @@
 
 ```
 HS256
-Enc: 3.0x | Dec: 1.8x
+Enc: 1.9x | Dec: 1.5x
 
 RS256
 Enc: 56.2x | Dec: 1.2x
 
 ES256
-Enc: 2.3x | Dec: 1.9x
+Enc: 1.9x | Dec: 1.5x
 
 EdDSA
- Enc: 2.5x | Dec: 2.4x
+Enc: 2.5x | Dec: 2.4x
 
 ES512
 Enc: 1.9x | Dec: 1.5x
@@ -52,7 +52,7 @@ decoded = wt.decode(token, key, algorithms=["HS256"])
 print(decoded)
 ```
 
-2. Toke style - in design
+2. webtoken style - in design
 
 3. Asyncio variants
 
