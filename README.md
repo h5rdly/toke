@@ -4,6 +4,10 @@
 
 **Rust-backed JWT**
 
+##  Size
+
+The Rust `.so` file on linux is ~3.7Mb, no external dependencies.
+
 ##  Speed
 
 [Simple benchmark](https://github.com/h5rdly/toke/blob/main/benchmarks/benchmarks.py)
@@ -26,10 +30,6 @@ Enc: 1.9x | Dec: 1.5x
 ```
 
 See (and suggest!) more benchmarks under [benchmarks](https://github.com/h5rdly/toke/blob/main/benchmarks/)
-
-##  Size
-
-The Rust `.so` file on linux is ~3.5Mb, no external dependencies.
 
 ##  Installation
 
