@@ -50,6 +50,7 @@ token = jwt.encode(payload, key, algorithm="HS256")
 
 decoded = jwt.decode(token, key, algorithms=["HS256"])
 print(decoded)
+# {'sub': '1234567890', 'name': 'John Doe', 'iat': 1516239022}
 ```
 
 2. webtoken style - in design
